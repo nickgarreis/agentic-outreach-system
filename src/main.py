@@ -14,6 +14,9 @@ from .database import get_supabase, get_pg_pool, close_connections
 from .config import get_settings
 from .deps import get_db, get_db_with_retry
 from .schemas import BaseResponse
+from .middleware import setup_middleware
+from .auth import get_validator
+from .routers import auth_router
 
 # Configure logging
 logging.basicConfig(
@@ -40,18 +43,29 @@ async def lifespan(app: FastAPI):
         # Initialize Supabase client
         logger.info("Initializing Supabase client...")
         client = await get_supabase()
-        logger.info(" Supabase client initialized")
+        logger.info("✓ Supabase client initialized")
         
         # Initialize PostgreSQL pool if DB URL is configured
         if settings.supabase_db_url:
             logger.info("Initializing PostgreSQL connection pool...")
             pool = await get_pg_pool()
-            logger.info(f" PostgreSQL pool initialized (max_size={pool._max_size})")
+            logger.info(f"✓ PostgreSQL pool initialized (max_size={pool._max_size})")
         else:
-            logger.info("� PostgreSQL pool not initialized (SUPABASE_DB_URL not set)")
+            logger.info("⚠ PostgreSQL pool not initialized (SUPABASE_DB_URL not set)")
+        
+        # Initialize JWT validator and prefetch JWKS
+        logger.info("Initializing JWT validator...")
+        validator = get_validator(settings)
+        # Prefetch JWKS keys to warm the cache
+        await validator.prefetch_keys()
+        # Set validator on auth middleware
+        for middleware in app.user_middleware:
+            if hasattr(middleware, 'cls') and middleware.cls.__name__ == 'AuthMiddleware':
+                middleware.kwargs['validator'] = validator
+        logger.info("✓ JWT validator initialized with ES256 support")
         
         # Add any other startup tasks here
-        logger.info(f" {settings.app_name} started successfully")
+        logger.info(f"✓ {settings.app_name} started successfully")
         
     except Exception as e:
         logger.error(f"Failed to start application: {e}")
@@ -64,11 +78,11 @@ async def lifespan(app: FastAPI):
     
     try:
         await close_connections()
-        logger.info(" All connections closed")
+        logger.info("✓ All connections closed")
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
     
-    logger.info(" Application shutdown complete")
+    logger.info("✓ Application shutdown complete")
 
 
 # Create FastAPI app
@@ -81,59 +95,9 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Configure CORS
+# Setup all middleware (CORS, Auth, Logging, Error handling)
 settings = get_settings()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"] if settings.debug else ["https://yourdomain.com"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-# Middleware for request logging and timing
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """
-    Log all requests with timing information.
-    Helps with debugging and performance monitoring.
-    """
-    # Generate request ID for tracing
-    request_id = f"{time.time()}"
-    
-    # Log request
-    logger.info(
-        f"[{request_id}] {request.method} {request.url.path} "
-        f"- Client: {request.client.host if request.client else 'unknown'}"
-    )
-    
-    # Time the request
-    start_time = time.time()
-    
-    try:
-        response = await call_next(request)
-        duration = time.time() - start_time
-        
-        # Log response
-        logger.info(
-            f"[{request_id}] {request.method} {request.url.path} "
-            f"- Status: {response.status_code} - Duration: {duration:.3f}s"
-        )
-        
-        # Add custom headers
-        response.headers["X-Request-ID"] = request_id
-        response.headers["X-Process-Time"] = str(duration)
-        
-        return response
-        
-    except Exception as e:
-        duration = time.time() - start_time
-        logger.error(
-            f"[{request_id}] {request.method} {request.url.path} "
-            f"- Error: {str(e)} - Duration: {duration:.3f}s"
-        )
-        raise
+setup_middleware(app, settings)
 
 
 # Health check endpoints
@@ -185,12 +149,15 @@ async def health_check():
 
 
 # API Routes - organize by feature
-# Import routers here as you create them
-# Example:
-# from .routers import campaigns, clients, jobs
+
+# Authentication routes (no additional prefix since it has /api/auth built in)
+app.include_router(auth_router)
+
+# Future routers will be added here:
 # app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"])
 # app.include_router(clients.router, prefix="/api/clients", tags=["clients"])
-# app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
+# app.include_router(leads.router, prefix="/api/leads", tags=["leads"])
+# app.include_router(messages.router, prefix="/api/messages", tags=["messages"])
 
 
 # Error handlers

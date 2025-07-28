@@ -5,7 +5,11 @@ python-dotenv>=1.0.0
 
 # Supabase SDK with async support
 supabase>=2.0.0
-httpx>=0.24.0
+httpx>=0.25.0
+
+# JWT with cryptography support for ES256
+PyJWT[crypto]>=2.8.0
+cryptography>=41.0.0
 
 # Retry logic
 tenacity>=8.2.0

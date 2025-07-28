@@ -118,36 +118,57 @@ async def get_settings_dep() -> Settings:
     return get_settings()
 
 
-# Auth dependencies (to be implemented based on your auth strategy)
+# Auth dependencies - now properly integrated with auth module
 
-async def get_current_user_token(
-    authorization: str | None = None,
-    settings: Settings = Depends(get_settings_dep),
-) -> str:
+from .auth import get_current_user, get_current_user_optional, UserClaims, AuthService
+
+# Re-export auth dependencies for easy access
+__all__ = ['get_current_user', 'get_current_user_optional', 'UserClaims']
+
+
+async def get_auth_service(db: Client = Depends(get_db)) -> AuthService:
     """
-    Extract and validate user token from Authorization header.
-    This is a placeholder - implement based on your auth strategy.
+    Get AuthService instance for authentication operations.
+    Use this in auth endpoints that need to perform login/logout.
     """
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header missing",
-        )
+    return AuthService(db)
+
+
+async def require_authenticated_user(
+    user: UserClaims = Depends(get_current_user)
+) -> UserClaims:
+    """
+    Dependency that requires an authenticated user.
+    Use this for endpoints that must have authentication.
     
-    # Extract token from "Bearer <token>" format
-    try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication scheme",
-            )
-        return token
-    except ValueError:
+    Example:
+        @app.get("/profile")
+        async def get_profile(user: UserClaims = Depends(require_authenticated_user)):
+            return {"user_id": user.user_id, "email": user.email}
+    """
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authorization header format",
+            detail="Authentication required",
         )
+    return user
+
+
+async def get_user_client_access(
+    user: UserClaims = Depends(get_current_user),
+    db: Client = Depends(get_db)
+) -> list[str]:
+    """
+    Get list of client IDs that the user has access to.
+    This will be used to filter data based on user permissions.
+    """
+    try:
+        # Query clients where user has access
+        response = await db.table("clients").select("id").eq("user_id", user.user_id).execute()
+        return [client["id"] for client in response.data]
+    except Exception as e:
+        logger.error(f"Failed to get user client access: {e}")
+        return []
 
 
 # Service role dependency (only for background workers)
