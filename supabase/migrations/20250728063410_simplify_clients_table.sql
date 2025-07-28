@@ -1,0 +1,3 @@
+-- This migration was already applied on the remote main branch
+-- This file exists to keep local and remote migrations in sync
+-- Original migration simplified the clients table structure
