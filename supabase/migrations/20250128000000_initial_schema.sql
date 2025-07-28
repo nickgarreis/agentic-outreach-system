@@ -1,5 +1,6 @@
 -- Initial schema migration for Agentic Outreach System
 -- This migration creates the complete database structure
+-- Made idempotent to work on both dev and main branches
 
 -- Create clients table
 create table if not exists public.clients (
@@ -9,24 +10,38 @@ create table if not exists public.clients (
     user_id uuid references auth.users(id) -- Owner of the client organization
 );
 
--- Enable RLS on clients
-alter table public.clients enable row level security;
+-- Enable RLS on clients if not already enabled
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_tables 
+        WHERE schemaname = 'public' 
+        AND tablename = 'clients' 
+        AND rowsecurity = true
+    ) THEN
+        ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
--- RLS Policies for clients
-create policy "Users can view own clients" on public.clients
-    for select using (auth.uid() = user_id);
+-- RLS Policies for clients (drop if exists, then create)
+DROP POLICY IF EXISTS "Users can view own clients" ON public.clients;
+CREATE POLICY "Users can view own clients" ON public.clients
+    FOR SELECT USING (auth.uid() = user_id);
 
-create policy "Users can insert own clients" on public.clients
-    for insert with check (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can insert own clients" ON public.clients;
+CREATE POLICY "Users can insert own clients" ON public.clients
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
 
-create policy "Users can update own clients" on public.clients
-    for update using (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update own clients" ON public.clients;
+CREATE POLICY "Users can update own clients" ON public.clients
+    FOR UPDATE USING (auth.uid() = user_id);
 
-create policy "Users can delete own clients" on public.clients
-    for delete using (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can delete own clients" ON public.clients;
+CREATE POLICY "Users can delete own clients" ON public.clients
+    FOR DELETE USING (auth.uid() = user_id);
 
 -- Create campaigns table
-create table if not exists public.campaigns (
+CREATE TABLE IF NOT EXISTS public.campaigns (
     id uuid primary key default gen_random_uuid(),
     client_id uuid not null references public.clients(id),
     name text not null,
@@ -34,40 +49,54 @@ create table if not exists public.campaigns (
     created_at timestamptz not null default now()
 );
 
--- Enable RLS on campaigns
-alter table public.campaigns enable row level security;
+-- Enable RLS on campaigns if not already enabled
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_tables 
+        WHERE schemaname = 'public' 
+        AND tablename = 'campaigns' 
+        AND rowsecurity = true
+    ) THEN
+        ALTER TABLE public.campaigns ENABLE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
--- RLS Policies for campaigns
-create policy "Users can view campaigns for their clients" on public.campaigns
-    for select using (
+-- RLS Policies for campaigns (drop if exists, then create)
+DROP POLICY IF EXISTS "Users can view campaigns for their clients" ON public.campaigns;
+CREATE POLICY "Users can view campaigns for their clients" ON public.campaigns
+    FOR SELECT USING (
         client_id in (
             select id from public.clients where user_id = auth.uid()
         )
     );
 
-create policy "Users can insert campaigns for their clients" on public.campaigns
-    for insert with check (
+DROP POLICY IF EXISTS "Users can insert campaigns for their clients" ON public.campaigns;
+CREATE POLICY "Users can insert campaigns for their clients" ON public.campaigns
+    FOR INSERT WITH CHECK (
         client_id in (
             select id from public.clients where user_id = auth.uid()
         )
     );
 
-create policy "Users can update campaigns for their clients" on public.campaigns
-    for update using (
+DROP POLICY IF EXISTS "Users can update campaigns for their clients" ON public.campaigns;
+CREATE POLICY "Users can update campaigns for their clients" ON public.campaigns
+    FOR UPDATE USING (
         client_id in (
             select id from public.clients where user_id = auth.uid()
         )
     );
 
-create policy "Users can delete campaigns for their clients" on public.campaigns
-    for delete using (
+DROP POLICY IF EXISTS "Users can delete campaigns for their clients" ON public.campaigns;
+CREATE POLICY "Users can delete campaigns for their clients" ON public.campaigns
+    FOR DELETE USING (
         client_id in (
             select id from public.clients where user_id = auth.uid()
         )
     );
 
 -- Create leads table
-create table if not exists public.leads (
+CREATE TABLE IF NOT EXISTS public.leads (
     id uuid primary key default gen_random_uuid(),
     campaign_id uuid not null references public.campaigns(id),
     email text,
@@ -79,12 +108,23 @@ create table if not exists public.leads (
     client_id uuid references public.clients(id)
 );
 
--- Enable RLS on leads
-alter table public.leads enable row level security;
+-- Enable RLS on leads if not already enabled
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_tables 
+        WHERE schemaname = 'public' 
+        AND tablename = 'leads' 
+        AND rowsecurity = true
+    ) THEN
+        ALTER TABLE public.leads ENABLE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
--- RLS Policies for leads
-create policy "Users can view leads for their campaigns" on public.leads
-    for select using (
+-- RLS Policies for leads (drop if exists, then create)
+DROP POLICY IF EXISTS "Users can view leads for their campaigns" ON public.leads;
+CREATE POLICY "Users can view leads for their campaigns" ON public.leads
+    FOR SELECT USING (
         campaign_id in (
             select c.id 
             from public.campaigns c
@@ -93,8 +133,9 @@ create policy "Users can view leads for their campaigns" on public.leads
         )
     );
 
-create policy "Users can insert leads for their campaigns" on public.leads
-    for insert with check (
+DROP POLICY IF EXISTS "Users can insert leads for their campaigns" ON public.leads;
+CREATE POLICY "Users can insert leads for their campaigns" ON public.leads
+    FOR INSERT WITH CHECK (
         campaign_id in (
             select c.id 
             from public.campaigns c
@@ -103,8 +144,9 @@ create policy "Users can insert leads for their campaigns" on public.leads
         )
     );
 
-create policy "Users can update leads for their campaigns" on public.leads
-    for update using (
+DROP POLICY IF EXISTS "Users can update leads for their campaigns" ON public.leads;
+CREATE POLICY "Users can update leads for their campaigns" ON public.leads
+    FOR UPDATE USING (
         campaign_id in (
             select c.id 
             from public.campaigns c
@@ -113,8 +155,9 @@ create policy "Users can update leads for their campaigns" on public.leads
         )
     );
 
-create policy "Users can delete leads for their campaigns" on public.leads
-    for delete using (
+DROP POLICY IF EXISTS "Users can delete leads for their campaigns" ON public.leads;
+CREATE POLICY "Users can delete leads for their campaigns" ON public.leads
+    FOR DELETE USING (
         campaign_id in (
             select c.id 
             from public.campaigns c
@@ -124,7 +167,7 @@ create policy "Users can delete leads for their campaigns" on public.leads
     );
 
 -- Create messages table
-create table if not exists public.messages (
+CREATE TABLE IF NOT EXISTS public.messages (
     id uuid primary key default gen_random_uuid(),
     lead_id uuid not null references public.leads(id),
     campaign_id uuid not null references public.campaigns(id),
@@ -137,12 +180,23 @@ create table if not exists public.messages (
     created_at timestamptz not null default now()
 );
 
--- Enable RLS on messages
-alter table public.messages enable row level security;
+-- Enable RLS on messages if not already enabled
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_tables 
+        WHERE schemaname = 'public' 
+        AND tablename = 'messages' 
+        AND rowsecurity = true
+    ) THEN
+        ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
--- RLS Policies for messages
-create policy "Users can view messages for their campaigns" on public.messages
-    for select using (
+-- RLS Policies for messages (drop if exists, then create)
+DROP POLICY IF EXISTS "Users can view messages for their campaigns" ON public.messages;
+CREATE POLICY "Users can view messages for their campaigns" ON public.messages
+    FOR SELECT USING (
         campaign_id in (
             select c.id 
             from public.campaigns c
@@ -151,8 +205,9 @@ create policy "Users can view messages for their campaigns" on public.messages
         )
     );
 
-create policy "Users can insert messages for their campaigns" on public.messages
-    for insert with check (
+DROP POLICY IF EXISTS "Users can insert messages for their campaigns" ON public.messages;
+CREATE POLICY "Users can insert messages for their campaigns" ON public.messages
+    FOR INSERT WITH CHECK (
         campaign_id in (
             select c.id 
             from public.campaigns c
@@ -161,8 +216,9 @@ create policy "Users can insert messages for their campaigns" on public.messages
         )
     );
 
-create policy "Users can update messages for their campaigns" on public.messages
-    for update using (
+DROP POLICY IF EXISTS "Users can update messages for their campaigns" ON public.messages;
+CREATE POLICY "Users can update messages for their campaigns" ON public.messages
+    FOR UPDATE USING (
         campaign_id in (
             select c.id 
             from public.campaigns c
@@ -171,8 +227,9 @@ create policy "Users can update messages for their campaigns" on public.messages
         )
     );
 
-create policy "Users can delete messages for their campaigns" on public.messages
-    for delete using (
+DROP POLICY IF EXISTS "Users can delete messages for their campaigns" ON public.messages;
+CREATE POLICY "Users can delete messages for their campaigns" ON public.messages
+    FOR DELETE USING (
         campaign_id in (
             select c.id 
             from public.campaigns c
