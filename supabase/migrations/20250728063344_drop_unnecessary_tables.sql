@@ -1,0 +1,3 @@
+-- This migration was already applied on the remote dev branch
+-- This file exists to keep local and remote migrations in sync
+-- Original migration dropped unnecessary tables from the branch

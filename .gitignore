@@ -1,2 +1,6 @@
 .env
 .env.example
+
+# Supabase
+supabase/.branches
+supabase/.temp
