@@ -42,7 +42,7 @@ Each perspective represents a major feature:
 - **RenderWorker**: Where the AutopilotAgent lives. Has a job_scheduler functionality
 
 ### Access to MCPs
-- Supabase MCP: Read and edit our Supabase tabels, triggers and edge functions
+- Supabase MCP: READ-ONLY access to Supabase tables, triggers and edge functions. NEVER use MCP for database modifications.
 - Exa Search MCP: Search the internet, github and other developer orientated sources to get the latest information about coding/developement practices
 
 ## Technology Stack
@@ -80,3 +80,43 @@ Each perspective represents a major feature:
 
 # IMPORTANT
 - never EVER push to github unless the User explicitly tells you to.
+
+## Supabase Development
+
+### Branch Configuration
+- **Dev Branch Project ID**: `gzprcujfksbnqixojjdg` 
+- **Main Branch Project ID**: `dmfniygxoaijrnjornaq` (DO NOT USE)
+- ALWAYS use the dev branch project ID for all Supabase operations
+
+### Database Management
+
+#### Reading Database Structure:
+- Use Supabase MCP (READ-ONLY) to inspect current database state
+- Available MCP tools for reading:
+  - `list_tables` - View all tables and their structure
+  - `execute_sql` - Run SELECT queries to inspect data
+  - `list_migrations` - See applied migrations
+  - `get_advisors` - Check for security/performance issues
+
+#### Making Database Changes:
+1. **Inspect current state** using Supabase MCP read operations
+2. **Create migration file** in `/supabase/migrations/` with timestamp prefix (e.g., `20250128_add_user_profiles.sql`)
+3. **Write SQL changes** in the migration file
+4. **Apply migration** to dev branch via Supabase MCP `apply_migration` tool
+5. **Test thoroughly** before committing
+
+#### Migration Guidelines:
+- All database changes MUST go through migration files
+- NEVER modify database directly without creating a migration
+- Migration files should be:
+  - Idempotent (safe to run multiple times)
+  - Include both schema changes and data migrations if needed
+  - Well-commented explaining the changes
+
+#### Current Tables:
+- `clients` - Client organizations
+- `campaigns` - Marketing campaigns  
+- `leads` - Campaign prospects
+- `messages` - Outreach messages
+
+IMPORTANT: The Supabase MCP is READ-ONLY for safety. All modifications must go through proper migration files.
