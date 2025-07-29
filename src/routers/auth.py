@@ -20,19 +20,21 @@ router = APIRouter(
     responses={
         401: {"description": "Unauthorized"},
         403: {"description": "Forbidden"},
-    }
+    },
 )
 
 
 # Request/Response schemas
 class LoginRequest(BaseModel):
     """Login request with email and password"""
+
     email: EmailStr
     password: str
 
 
 class LoginResponse(BaseModel):
     """Login response with tokens and user info"""
+
     access_token: str
     refresh_token: str
     token_type: str = "Bearer"
@@ -41,11 +43,13 @@ class LoginResponse(BaseModel):
 
 class RefreshRequest(BaseModel):
     """Token refresh request"""
+
     refresh_token: str
 
 
 class RefreshResponse(BaseModel):
     """Token refresh response"""
+
     access_token: str
     refresh_token: str
     token_type: str = "Bearer"
@@ -53,6 +57,7 @@ class RefreshResponse(BaseModel):
 
 class UserProfileResponse(BaseModel):
     """User profile information"""
+
     id: str
     email: str
     created_at: str
@@ -63,8 +68,7 @@ class UserProfileResponse(BaseModel):
 # Endpoints
 @router.post("/login", response_model=LoginResponse)
 async def login(
-    request: LoginRequest,
-    auth_service: AuthService = Depends(get_auth_service)
+    request: LoginRequest, auth_service: AuthService = Depends(get_auth_service)
 ) -> LoginResponse:
     """
     Login with email and password.
@@ -75,15 +79,14 @@ async def login(
         return LoginResponse(
             access_token=result["access_token"],
             refresh_token=result["refresh_token"],
-            user=result["user"]
+            user=result["user"],
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Login error: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Login failed"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Login failed"
         )
 
 
@@ -91,7 +94,7 @@ async def login(
 async def logout(
     response: Response,
     user: UserClaims = Depends(get_current_user),
-    auth_service: AuthService = Depends(get_auth_service)
+    auth_service: AuthService = Depends(get_auth_service),
 ) -> None:
     """
     Logout the current user.
@@ -101,11 +104,11 @@ async def logout(
         # Get token from user claims (the token used to authenticate this request)
         # In production, you might want to pass the token explicitly
         await auth_service.logout(user.session_id)
-        
+
         # Clear cookies if you're using them
         response.delete_cookie("access_token")
         response.delete_cookie("refresh_token")
-        
+
     except Exception as e:
         logger.error(f"Logout error: {e}")
         # Don't fail logout - always succeed from client perspective
@@ -113,8 +116,7 @@ async def logout(
 
 @router.post("/refresh", response_model=RefreshResponse)
 async def refresh_token(
-    request: RefreshRequest,
-    auth_service: AuthService = Depends(get_auth_service)
+    request: RefreshRequest, auth_service: AuthService = Depends(get_auth_service)
 ) -> RefreshResponse:
     """
     Refresh access token using refresh token.
@@ -123,8 +125,7 @@ async def refresh_token(
     try:
         result = await auth_service.refresh_token(request.refresh_token)
         return RefreshResponse(
-            access_token=result["access_token"],
-            refresh_token=result["refresh_token"]
+            access_token=result["access_token"], refresh_token=result["refresh_token"]
         )
     except HTTPException:
         raise
@@ -132,14 +133,14 @@ async def refresh_token(
         logger.error(f"Token refresh error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Token refresh failed"
+            detail="Token refresh failed",
         )
 
 
 @router.get("/me", response_model=UserProfileResponse)
 async def get_current_user_profile(
     user: UserClaims = Depends(get_current_user),
-    auth_service: AuthService = Depends(get_auth_service)
+    auth_service: AuthService = Depends(get_auth_service),
 ) -> UserProfileResponse:
     """
     Get current user profile information.
@@ -148,13 +149,13 @@ async def get_current_user_profile(
     try:
         # Get full profile from Supabase
         profile = await auth_service.get_user_profile(user.user_id)
-        
+
         return UserProfileResponse(
             id=profile["id"],
             email=profile["email"],
             created_at=profile["created_at"],
             last_sign_in_at=profile.get("last_sign_in_at"),
-            metadata=profile.get("metadata")
+            metadata=profile.get("metadata"),
         )
     except HTTPException:
         raise
@@ -162,14 +163,12 @@ async def get_current_user_profile(
         logger.error(f"Get profile error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get user profile"
+            detail="Failed to get user profile",
         )
 
 
 @router.post("/verify", response_model=Dict[str, Any])
-async def verify_token(
-    user: UserClaims = Depends(get_current_user)
-) -> Dict[str, Any]:
+async def verify_token(user: UserClaims = Depends(get_current_user)) -> Dict[str, Any]:
     """
     Verify if the current token is valid.
     Returns user claims if valid.
@@ -179,7 +178,7 @@ async def verify_token(
         "user_id": user.user_id,
         "email": user.email,
         "role": user.role,
-        "expires_at": user.exp
+        "expires_at": user.exp,
     }
 
 
@@ -197,7 +196,7 @@ async def auth_health() -> Dict[str, str]:
 @router.get("/metrics", response_model=Dict[str, Any])
 async def get_auth_metrics(
     user: UserClaims = Depends(get_current_user),
-    validator: JWTValidator = Depends(get_validator)
+    validator: JWTValidator = Depends(get_validator),
 ) -> Dict[str, Any]:
     """
     Get JWT validation metrics.
@@ -207,5 +206,5 @@ async def get_auth_metrics(
         "validation_metrics": validator.get_metrics(),
         "current_user": user.user_id,
         "algorithm": "ES256",
-        "key_type": "asymmetric"
+        "key_type": "asymmetric",
     }
