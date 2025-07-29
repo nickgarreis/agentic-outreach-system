@@ -1,12 +1,12 @@
 # Define environment groups - one for API, one for Worker
 envVarGroups:
-  # API environment variables
+  # Production API environment variables
   - name: agentic-outreach-api-env
     envVars:
       - key: SUPABASE_URL
-        sync: false
+        value: https://dmfniygxoaijrnjornaq.supabase.co
       - key: SUPABASE_ANON_KEY
-        sync: false
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtZm5peWd4b2FpanJuam9ybmFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM2MDQzMDEsImV4cCI6MjA2OTE4MDMwMX0.MfRH-KoCjuWfwzR4tcyoJo-crvMuUGri94pz-bnZfOk
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_BASE_URL
@@ -22,11 +22,33 @@ envVarGroups:
       - key: APP_NAME
         value: "Agentic Outreach API"
   
-  # Worker environment variables
+  # Dev API environment variables
+  - name: agentic-outreach-api-dev-env
+    envVars:
+      - key: SUPABASE_URL
+        value: https://tqjyyedrazaimtujdjrw.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRxanl5ZWRyYXphaW10dWpkanJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM3MzQ2NjYsImV4cCI6MjA2OTMxMDY2Nn0.4uGzPeKvNoybQm3CfDuBYX18-ewuU_ZtrRa6pGCUQyA
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: AGENTOPS_API_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: ES256
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: APP_NAME
+        value: "Agentic Outreach API Dev"
+  
+  # Production Worker environment variables
   - name: agentic-outreach-worker-env
     envVars:
       - key: SUPABASE_URL
-        sync: false
+        value: https://dmfniygxoaijrnjornaq.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: OPENROUTER_API_KEY
@@ -37,6 +59,22 @@ envVarGroups:
         sync: false
       - key: APP_NAME
         value: "Agentic Outreach Worker"
+  
+  # Dev Worker environment variables
+  - name: agentic-outreach-worker-dev-env
+    envVars:
+      - key: SUPABASE_URL
+        value: https://tqjyyedrazaimtujdjrw.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: AGENTOPS_API_KEY
+        sync: false
+      - key: APP_NAME
+        value: "Agentic Outreach Worker Dev"
 
 services:
   # Production Web Service - FastAPI API
@@ -65,7 +103,7 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT --reload
     envVars:
-      - fromGroup: agentic-outreach-api-env
+      - fromGroup: agentic-outreach-api-dev-env
       - key: DEBUG
         value: true
     autoDeploy: true
@@ -79,7 +117,7 @@ services:
     plan: starter
     branch: main
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m src.background.render_worker
+    startCommand: python -m background.render_worker
     envVars:
       - fromGroup: agentic-outreach-worker-env
       - key: DEBUG
@@ -94,9 +132,9 @@ services:
     plan: free
     branch: dev
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m src.background.render_worker
+    startCommand: python -m background.render_worker
     envVars:
-      - fromGroup: agentic-outreach-worker-env
+      - fromGroup: agentic-outreach-worker-dev-env
       - key: DEBUG
         value: true
     autoDeploy: true
