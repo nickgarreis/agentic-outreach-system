@@ -98,7 +98,7 @@ services:
     name: agentic-outreach-api-dev
     runtime: python
     region: frankfurt
-    plan: free
+    plan: starter
     branch: dev
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT --reload
@@ -129,7 +129,7 @@ services:
     name: agentic-outreach-worker-dev
     runtime: python
     region: frankfurt
-    plan: free
+    plan: starter
     branch: dev
     buildCommand: pip install -r requirements.txt
     startCommand: python -m background.render_worker
