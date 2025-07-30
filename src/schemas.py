@@ -167,7 +167,7 @@ class JobCreate(BaseModel):
     )
 
 
-class JobResponse(BaseModel, TimestampMixin):
+class JobResponse(TimestampMixin):
     """Job response model"""
 
     id: str = Field(..., description="Job ID")

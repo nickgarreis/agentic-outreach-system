@@ -38,11 +38,7 @@ async def get_supabase(use_secret_key: bool = False) -> Client:
         
         _supabase = create_client(
             os.environ["SUPABASE_URL"],
-            api_key,
-            options={
-                "is_async": True,
-                "timeout": 10,  # Default timeout for requests
-            },
+            api_key
         )
         logger.info(f"Supabase client created successfully with {'secret' if use_secret_key else 'publishable'} key")
 
