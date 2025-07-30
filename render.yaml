@@ -117,7 +117,7 @@ services:
     plan: starter
     branch: main
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m background.render_worker
+    startCommand: python -m src.background.render_worker
     envVars:
       - fromGroup: agentic-outreach-worker-env
       - key: DEBUG
@@ -132,7 +132,7 @@ services:
     plan: starter
     branch: dev
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m background.render_worker
+    startCommand: python -m src.background.render_worker
     envVars:
       - fromGroup: agentic-outreach-worker-dev-env
       - key: DEBUG
