@@ -175,25 +175,25 @@ async def get_user_client_access(
         return []
 
 
-# Service role dependency (only for background workers)
+# Secret key dependency (only for background workers)
 
 
 async def get_service_db(settings: Settings = Depends(get_settings_dep)) -> Client:
     """
-    Get Supabase client with service role key.
+    Get Supabase client with secret key.
     ONLY use this in background workers, never in web-facing routes!
     """
-    if not settings.supabase_service_role_key:
+    if not settings.supabase_secret_key:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Service role key not configured",
+            detail="Secret key not configured",
         )
 
-    # Create a separate client with service role key
+    # Create a separate client with secret key
     from supabase import create_client
 
     return create_client(
         settings.supabase_url,
-        settings.supabase_service_role_key,
+        settings.supabase_secret_key,
         options={"is_async": True},
     )

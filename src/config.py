@@ -16,8 +16,8 @@ class Settings(BaseSettings):
 
     # Supabase configuration
     supabase_url: str
-    supabase_anon_key: str  # For web-facing routes
-    supabase_service_role_key: Optional[str] = None  # Only for background worker
+    supabase_publishable_key: str  # Public key for web-facing routes (replaces anon key)
+    supabase_secret_key: Optional[str] = None  # Private key for backend operations (replaces service role key)
     supabase_db_url: Optional[str] = None  # Only if raw SQL needed (port 6543)
 
     # Application settings

@@ -5,16 +5,16 @@ envVarGroups:
     envVars:
       - key: SUPABASE_URL
         value: https://dmfniygxoaijrnjornaq.supabase.co
-      - key: SUPABASE_ANON_KEY
-        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtZm5peWd4b2FpanJuam9ybmFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM2MDQzMDEsImV4cCI6MjA2OTE4MDMwMX0.MfRH-KoCjuWfwzR4tcyoJo-crvMuUGri94pz-bnZfOk
+      - key: SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_FRzSSp0eor3QnuvR1xm9Iw__MTjWqfx
       - key: OPENROUTER_API_KEY
-        sync: false
+        value: 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
       - key: OPENROUTER_BASE_URL
         value: https://openrouter.ai/api/v1
       - key: AGENTOPS_API_KEY
-        sync: false
+        value: 355ddee1-57fb-44ee-b45a-83fbb05503c8
       - key: JWT_SECRET_KEY
-        generateValue: true
+        value: f710edae-0086-4fd0-a5fd-59f7cd204a39
       - key: JWT_ALGORITHM
         value: ES256
       - key: CORS_ORIGINS
@@ -27,16 +27,16 @@ envVarGroups:
     envVars:
       - key: SUPABASE_URL
         value: https://tqjyyedrazaimtujdjrw.supabase.co
-      - key: SUPABASE_ANON_KEY
-        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRxanl5ZWRyYXphaW10dWpkanJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM3MzQ2NjYsImV4cCI6MjA2OTMxMDY2Nn0.4uGzPeKvNoybQm3CfDuBYX18-ewuU_ZtrRa6pGCUQyA
+      - key: SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_X80tZQGzoRlM6oIsqGLvhg_ZRKE1fMi
       - key: OPENROUTER_API_KEY
-        sync: false
+        value: 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
       - key: OPENROUTER_BASE_URL
         value: https://openrouter.ai/api/v1
       - key: AGENTOPS_API_KEY
-        sync: false
+        value: 355ddee1-57fb-44ee-b45a-83fbb05503c8
       - key: JWT_SECRET_KEY
-        generateValue: true
+        value: truf710edae-0086-4fd0-a5fd-59f7cd204a39e
       - key: JWT_ALGORITHM
         value: ES256
       - key: CORS_ORIGINS
@@ -49,14 +49,14 @@ envVarGroups:
     envVars:
       - key: SUPABASE_URL
         value: https://dmfniygxoaijrnjornaq.supabase.co
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
+      - key: SUPABASE_SECRET_KEY
+        value: sb_secret_qomDY0kL1xUjozNiSnanww__9AqLa-M
       - key: OPENROUTER_API_KEY
-        sync: false
+        value: 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
       - key: OPENROUTER_BASE_URL
         value: https://openrouter.ai/api/v1
       - key: AGENTOPS_API_KEY
-        sync: false
+        value: 355ddee1-57fb-44ee-b45a-83fbb05503c8
       - key: APP_NAME
         value: "Agentic Outreach Worker"
   
@@ -65,14 +65,14 @@ envVarGroups:
     envVars:
       - key: SUPABASE_URL
         value: https://tqjyyedrazaimtujdjrw.supabase.co
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
+      - key: SUPABASE_SECRET_KEY
+        value: sb_secret_vnJVcpnH7Qh3mhJHAzf8mQ_F0WleuLV
       - key: OPENROUTER_API_KEY
-        sync: false
+        value: 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
       - key: OPENROUTER_BASE_URL
         value: https://openrouter.ai/api/v1
       - key: AGENTOPS_API_KEY
-        sync: false
+        value: 355ddee1-57fb-44ee-b45a-83fbb05503c8
       - key: APP_NAME
         value: "Agentic Outreach Worker Dev"
 

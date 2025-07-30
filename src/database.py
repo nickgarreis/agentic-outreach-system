@@ -16,25 +16,35 @@ _supabase: Optional[Client] = None
 _pg_pool: Optional[asyncpg.Pool] = None
 
 
-async def get_supabase() -> Client:
+async def get_supabase(use_secret_key: bool = False) -> Client:
     """
     Get or create singleton Supabase client with async support.
-    Uses SUPABASE_ANON_KEY for web-facing API routes.
+    
+    Args:
+        use_secret_key: If True, uses SUPABASE_SECRET_KEY for backend operations.
+                       If False, uses SUPABASE_PUBLISHABLE_KEY for web-facing API routes.
     """
     global _supabase
 
     if _supabase is None:
         # Initialize with async support enabled
         logger.info("Creating new Supabase client...")
+        
+        # Choose the appropriate key based on usage context
+        api_key = (
+            os.environ["SUPABASE_SECRET_KEY"] if use_secret_key 
+            else os.environ["SUPABASE_PUBLISHABLE_KEY"]
+        )
+        
         _supabase = create_client(
             os.environ["SUPABASE_URL"],
-            os.environ["SUPABASE_ANON_KEY"],  # Use anon key for web-facing API
+            api_key,
             options={
                 "is_async": True,
                 "timeout": 10,  # Default timeout for requests
             },
         )
-        logger.info("Supabase client created successfully")
+        logger.info(f"Supabase client created successfully with {'secret' if use_secret_key else 'publishable'} key")
 
     return _supabase
 

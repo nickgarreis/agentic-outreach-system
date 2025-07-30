@@ -55,9 +55,9 @@ class RenderWorker:
         else:
             logger.warning("⚠ Running without AgentOps tracking")
 
-        # Initialize Supabase with service role key
-        self.supabase = await get_supabase(use_service_role=True)
-        logger.info("✓ Connected to Supabase with service role")
+        # Initialize Supabase with secret key for backend operations
+        self.supabase = await get_supabase(use_secret_key=True)
+        logger.info("✓ Connected to Supabase with secret key")
 
         # Set up graceful shutdown handlers
         signal.signal(signal.SIGINT, self._shutdown_handler)
