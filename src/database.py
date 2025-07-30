@@ -5,18 +5,18 @@
 
 import os
 from typing import Optional
-from supabase import create_client, Client
+from supabase import create_client, Client, create_async_client, AsyncClient
 import asyncpg
 import logging
 
 logger = logging.getLogger(__name__)
 
 # Global singleton instances
-_supabase: Optional[Client] = None
+_supabase: Optional[AsyncClient] = None
 _pg_pool: Optional[asyncpg.Pool] = None
 
 
-async def get_supabase(use_secret_key: bool = False) -> Client:
+async def get_supabase(use_secret_key: bool = False) -> AsyncClient:
     """
     Get or create singleton Supabase client with async support.
     
@@ -36,7 +36,7 @@ async def get_supabase(use_secret_key: bool = False) -> Client:
             else os.environ["SUPABASE_PUBLISHABLE_KEY"]
         )
         
-        _supabase = create_client(
+        _supabase = await create_async_client(
             os.environ["SUPABASE_URL"],
             api_key
         )
