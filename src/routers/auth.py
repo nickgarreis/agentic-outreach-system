@@ -9,7 +9,7 @@ from pydantic import BaseModel, EmailStr
 import logging
 
 from ..deps import get_auth_service, get_current_user, UserClaims
-from ..auth import AuthService, JWTValidator
+from ..auth import AuthService, JWTValidator, get_validator
 
 logger = logging.getLogger(__name__)
 
