@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel, EmailStr
 import logging
 
-from ..deps import get_auth_service, get_current_user, UserClaims, get_validator
+from ..deps import get_auth_service, get_current_user, UserClaims
 from ..auth import AuthService, JWTValidator
 
 logger = logging.getLogger(__name__)
