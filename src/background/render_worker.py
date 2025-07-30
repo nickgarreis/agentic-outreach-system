@@ -107,21 +107,19 @@ class RenderWorker:
         """
         try:
             # Query for pending jobs, ordered by priority and created_at
-            response = (
-                self.supabase.table("jobs")
-                .select("*")
-                .eq("status", "pending")
-                .order("priority", desc=True)
-                .order("created_at")
-                .limit(1)
+            response = await self.supabase.table("jobs")\
+                .select("*")\
+                .eq("status", "pending")\
+                .order("priority", desc=True)\
+                .order("created_at")\
+                .limit(1)\
                 .execute()
-            )
 
             if response.data:
                 job = response.data[0]
 
                 # Immediately mark job as processing to prevent double processing
-                self.supabase.table("jobs").update(
+                await self.supabase.table("jobs").update(
                     {
                         "status": "processing",
                         "started_at": datetime.utcnow().isoformat(),
@@ -223,9 +221,9 @@ class RenderWorker:
             elif status == "failed":
                 update_data["failed_at"] = datetime.utcnow().isoformat()
 
-            self.supabase.table("jobs").update(update_data).eq(
-                "id", job_id
-            ).execute()
+            await self.supabase.table("jobs").update(update_data)\
+                .eq("id", job_id)\
+                .execute()
 
         except Exception as e:
             logger.error(f"Failed to update job status: {e}")
@@ -337,7 +335,7 @@ class JobScheduler:
             supabase = await get_supabase()
 
             # Only cancel if job is still pending
-            supabase.table("jobs").update(
+            await supabase.table("jobs").update(
                 {
                     "status": "cancelled",
                     "cancelled_at": datetime.utcnow().isoformat(),
@@ -365,13 +363,11 @@ class JobScheduler:
         """
         try:
             supabase = await get_supabase()
-            response = (
-                supabase.table("jobs")
-                .select("*")
-                .eq("id", job_id)
-                .single()
+            response = await supabase.table("jobs")\
+                .select("*")\
+                .eq("id", job_id)\
+                .single()\
                 .execute()
-            )
             return response.data
         except Exception as e:
             logger.error(f"Failed to get job status: {e}")
