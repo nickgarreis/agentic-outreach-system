@@ -108,7 +108,7 @@ class RenderWorker:
         try:
             # Query for pending jobs, ordered by priority and created_at
             response = (
-                await self.supabase.table("jobs")
+                self.supabase.table("jobs")
                 .select("*")
                 .eq("status", "pending")
                 .order("priority", desc=True)
@@ -121,7 +121,7 @@ class RenderWorker:
                 job = response.data[0]
 
                 # Immediately mark job as processing to prevent double processing
-                await self.supabase.table("jobs").update(
+                self.supabase.table("jobs").update(
                     {
                         "status": "processing",
                         "started_at": datetime.utcnow().isoformat(),
@@ -223,7 +223,7 @@ class RenderWorker:
             elif status == "failed":
                 update_data["failed_at"] = datetime.utcnow().isoformat()
 
-            await self.supabase.table("jobs").update(update_data).eq(
+            self.supabase.table("jobs").update(update_data).eq(
                 "id", job_id
             ).execute()
 
@@ -337,7 +337,7 @@ class JobScheduler:
             supabase = await get_supabase()
 
             # Only cancel if job is still pending
-            await supabase.table("jobs").update(
+            supabase.table("jobs").update(
                 {
                     "status": "cancelled",
                     "cancelled_at": datetime.utcnow().isoformat(),
@@ -366,7 +366,7 @@ class JobScheduler:
         try:
             supabase = await get_supabase()
             response = (
-                await supabase.table("jobs")
+                supabase.table("jobs")
                 .select("*")
                 .eq("id", job_id)
                 .single()
