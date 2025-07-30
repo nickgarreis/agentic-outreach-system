@@ -49,6 +49,8 @@ envVarGroups:
     envVars:
       - key: SUPABASE_URL
         value: https://dmfniygxoaijrnjornaq.supabase.co
+      - key: SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_FRzSSp0eor3QnuvR1xm9Iw__MTjWqfx
       - key: SUPABASE_SECRET_KEY
         value: sb_secret_qomDY0kL1xUjozNiSnanww__9AqLa-M
       - key: OPENROUTER_API_KEY
@@ -65,6 +67,8 @@ envVarGroups:
     envVars:
       - key: SUPABASE_URL
         value: https://tqjyyedrazaimtujdjrw.supabase.co
+      - key: SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_X80tZQGzoRlM6oIsqGLvhg_ZRKE1fMi
       - key: SUPABASE_SECRET_KEY
         value: sb_secret_vnJVcpnH7Qh3mhJHAzf8mQ_F0WleuLV
       - key: OPENROUTER_API_KEY
