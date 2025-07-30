@@ -19,6 +19,11 @@ asyncpg>=0.28.0
 
 # Pydantic settings
 pydantic-settings>=2.0.0
+email-validator>=2.0.0  # Required for pydantic email validation
+
+# AI and Agent dependencies
+agentops>=0.4.18  # Agent monitoring and observability
+openai>=1.0.0  # For OpenRouter API integration
 
 # Testing
 pytest>=7.4.0

@@ -3,8 +3,7 @@
 # Manages application lifecycle and routing
 # RELEVANT FILES: database.py, deps.py, config.py, schemas.py
 
-from fastapi import FastAPI, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
 import logging
 import time
@@ -12,16 +11,15 @@ from typing import Dict, Any
 
 from .database import get_supabase, get_pg_pool, close_connections
 from .config import get_settings
-from .deps import get_db, get_db_with_retry
 from .schemas import BaseResponse
 from .middleware import setup_middleware
 from .auth import get_validator
 from .routers import auth_router
+from .agent.agentops_config import init_agentops
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -33,18 +31,18 @@ async def lifespan(app: FastAPI):
     Initialize connections on startup, clean up on shutdown.
     """
     settings = get_settings()
-    
+
     # Startup
     logger.info(f"Starting {settings.app_name}...")
     logger.info(f"Debug mode: {settings.debug}")
     logger.info(f"Running on Render: {settings.is_render}")
-    
+
     try:
         # Initialize Supabase client
         logger.info("Initializing Supabase client...")
-        client = await get_supabase()
+        await get_supabase()
         logger.info("✓ Supabase client initialized")
-        
+
         # Initialize PostgreSQL pool if DB URL is configured
         if settings.supabase_db_url:
             logger.info("Initializing PostgreSQL connection pool...")
@@ -52,7 +50,7 @@ async def lifespan(app: FastAPI):
             logger.info(f"✓ PostgreSQL pool initialized (max_size={pool._max_size})")
         else:
             logger.info("⚠ PostgreSQL pool not initialized (SUPABASE_DB_URL not set)")
-        
+
         # Initialize JWT validator and prefetch JWKS
         logger.info("Initializing JWT validator...")
         validator = get_validator(settings)
@@ -60,28 +58,42 @@ async def lifespan(app: FastAPI):
         await validator.prefetch_keys()
         # Set validator on auth middleware
         for middleware in app.user_middleware:
-            if hasattr(middleware, 'cls') and middleware.cls.__name__ == 'AuthMiddleware':
-                middleware.kwargs['validator'] = validator
+            if (
+                hasattr(middleware, "cls")
+                and middleware.cls.__name__ == "AuthMiddleware"
+            ):
+                middleware.kwargs["validator"] = validator
         logger.info("✓ JWT validator initialized with ES256 support")
-        
+
+        # Initialize AgentOps if API key is configured
+        if settings.agentops_api_key:
+            if init_agentops(settings.agentops_api_key):
+                logger.info("✓ AgentOps initialized for monitoring")
+            else:
+                logger.warning(
+                    "⚠ AgentOps initialization failed, continuing without monitoring"
+                )
+        else:
+            logger.info("ℹ AgentOps not configured (no API key)")
+
         # Add any other startup tasks here
         logger.info(f"✓ {settings.app_name} started successfully")
-        
+
     except Exception as e:
         logger.error(f"Failed to start application: {e}")
         raise
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down application...")
-    
+
     try:
         await close_connections()
         logger.info("✓ All connections closed")
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
-    
+
     logger.info("✓ Application shutdown complete")
 
 
@@ -102,13 +114,14 @@ setup_middleware(app, settings)
 
 # Health check endpoints
 
+
 @app.get("/", response_model=BaseResponse)
 async def root():
     """Root endpoint - basic health check"""
     return BaseResponse(
         success=True,
         message=f"{settings.app_name} is running",
-        data={"version": "1.0.0", "debug": settings.debug}
+        data={"version": "1.0.0", "debug": settings.debug},
     )
 
 
@@ -118,12 +131,8 @@ async def health_check():
     Detailed health check endpoint.
     Verifies all connections are working properly.
     """
-    health_status = {
-        "status": "healthy",
-        "timestamp": time.time(),
-        "checks": {}
-    }
-    
+    health_status = {"status": "healthy", "timestamp": time.time(), "checks": {}}
+
     # Check Supabase connection
     try:
         client = await get_supabase()
@@ -133,7 +142,7 @@ async def health_check():
     except Exception as e:
         health_status["status"] = "unhealthy"
         health_status["checks"]["supabase"] = f"error: {str(e)}"
-    
+
     # Check PostgreSQL pool if configured
     if settings.supabase_db_url:
         try:
@@ -144,7 +153,7 @@ async def health_check():
         except Exception as e:
             health_status["status"] = "unhealthy"
             health_status["checks"]["postgresql"] = f"error: {str(e)}"
-    
+
     return health_status
 
 
@@ -162,13 +171,12 @@ app.include_router(auth_router)
 
 # Error handlers
 
+
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
     """Handle 404 errors"""
     return BaseResponse(
-        success=False,
-        message="Resource not found",
-        data={"path": request.url.path}
+        success=False, message="Resource not found", data={"path": request.url.path}
     )
 
 
@@ -176,20 +184,13 @@ async def not_found_handler(request: Request, exc):
 async def internal_error_handler(request: Request, exc):
     """Handle 500 errors"""
     logger.error(f"Internal server error: {exc}")
-    return BaseResponse(
-        success=False,
-        message="Internal server error",
-        data=None
-    )
+    return BaseResponse(success=False, message="Internal server error", data=None)
 
 
 # For local development
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=settings.debug,
-        log_level="info"
+        "main:app", host="0.0.0.0", port=8000, reload=settings.debug, log_level="info"
     )
