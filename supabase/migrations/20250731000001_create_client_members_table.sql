@@ -72,6 +72,7 @@ CREATE POLICY "Users can accept their invitations" ON public.client_members
     );
 
 -- Create RLS policy: owners and admins can update member roles
+-- Note: Complex business logic (sole owner protection) is handled in API layer
 CREATE POLICY "Owners and admins can update member roles" ON public.client_members
     FOR UPDATE USING (
         EXISTS (
@@ -81,20 +82,10 @@ CREATE POLICY "Owners and admins can update member roles" ON public.client_membe
             AND cm.role IN ('owner', 'admin')
             AND cm.accepted_at IS NOT NULL
         )
-        -- Prevent role changes that would leave no owners
-        AND NOT (
-            role = 'owner' 
-            AND NEW.role != 'owner'
-            AND (
-                SELECT COUNT(*) FROM public.client_members cm2
-                WHERE cm2.client_id = client_members.client_id
-                AND cm2.role = 'owner'
-                AND cm2.accepted_at IS NOT NULL
-            ) = 1
-        )
     );
 
--- Create RLS policy: owners and admins can remove members (except sole owners)
+-- Create RLS policy: owners and admins can remove members
+-- Note: Sole owner protection is handled in API layer
 CREATE POLICY "Owners and admins can remove members" ON public.client_members
     FOR DELETE USING (
         EXISTS (
@@ -104,30 +95,11 @@ CREATE POLICY "Owners and admins can remove members" ON public.client_members
             AND cm.role IN ('owner', 'admin')
             AND cm.accepted_at IS NOT NULL
         )
-        -- Prevent deletion of sole owners
-        AND NOT (
-            role = 'owner'
-            AND (
-                SELECT COUNT(*) FROM public.client_members cm2
-                WHERE cm2.client_id = client_members.client_id
-                AND cm2.role = 'owner'
-                AND cm2.accepted_at IS NOT NULL
-            ) = 1
-        )
     );
 
 -- Create RLS policy: users can remove themselves from clients
+-- Note: Sole owner protection is handled in API layer
 CREATE POLICY "Users can remove themselves from clients" ON public.client_members
     FOR DELETE USING (
         auth.uid() = user_id
-        -- Prevent sole owners from removing themselves
-        AND NOT (
-            role = 'owner'
-            AND (
-                SELECT COUNT(*) FROM public.client_members cm
-                WHERE cm.client_id = client_members.client_id
-                AND cm.role = 'owner'
-                AND cm.accepted_at IS NOT NULL
-            ) = 1
-        )
     );
