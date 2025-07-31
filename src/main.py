@@ -14,7 +14,7 @@ from .config import get_settings
 from .schemas import BaseResponse
 from .middleware import setup_middleware
 from .auth import get_validator
-from .routers import auth_router
+from .routers import auth_router, client_members_router
 from .agent.agentops_config import init_agentops
 
 # Configure logging
@@ -161,6 +161,9 @@ async def health_check():
 
 # Authentication routes (no additional prefix since it has /api/auth built in)
 app.include_router(auth_router)
+
+# Client member management routes
+app.include_router(client_members_router)
 
 # Future routers will be added here:
 # app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"])

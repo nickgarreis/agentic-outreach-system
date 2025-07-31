@@ -236,3 +236,70 @@ class PaginatedResponse(BaseModel):
     offset: int = Field(..., description="Current offset")
     limit: int = Field(..., description="Page size")
     has_more: bool = Field(..., description="Whether more items exist")
+
+
+# Client Member schemas
+
+
+class ClientRole(str, Enum):
+    """Client member roles with hierarchical permissions"""
+
+    OWNER = "owner"  # Full access, can manage members, delete client
+    ADMIN = "admin"  # Full access, can manage members (except owners)
+    USER = "user"    # Read-only access to client data
+
+
+class ClientMemberBase(BaseModel):
+    """Base client member model"""
+
+    client_id: str = Field(..., description="Client ID")
+    user_id: str = Field(..., description="User ID")
+    role: ClientRole = Field(..., description="Member role")
+
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class ClientMemberInvite(BaseModel):
+    """Model for inviting a user to a client"""
+
+    user_email: EmailStr = Field(..., description="Email of user to invite")
+    role: ClientRole = Field(ClientRole.USER, description="Role to assign")
+    message: Optional[str] = Field(None, description="Optional invitation message")
+
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class ClientMemberUpdate(BaseModel):
+    """Model for updating a client member's role"""
+
+    role: ClientRole = Field(..., description="New role to assign")
+
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class ClientMemberResponse(ClientMemberBase, TimestampMixin):
+    """Client member response model"""
+
+    id: str = Field(..., description="Membership ID")
+    invited_by: Optional[str] = Field(None, description="User who sent invitation")
+    invited_at: Optional[datetime] = Field(None, description="Invitation timestamp")
+    accepted_at: Optional[datetime] = Field(None, description="Acceptance timestamp")
+    
+    # User details (populated from join)
+    user_email: Optional[str] = Field(None, description="Member email")
+    user_name: Optional[str] = Field(None, description="Member name")
+    
+    # Status flags
+    is_pending: bool = Field(..., description="Whether invitation is pending")
+    is_current_user: bool = Field(False, description="Whether this is the current user")
+
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+
+class ClientWithMemberResponse(ClientResponse):
+    """Client response with current user's role included"""
+    
+    user_role: Optional[ClientRole] = Field(None, description="Current user's role in this client")
+    member_count: int = Field(0, description="Total number of members")
+
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)

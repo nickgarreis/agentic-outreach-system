@@ -124,6 +124,7 @@ async def get_settings_dep() -> Settings:
 
 
 from .auth import get_current_user, get_current_user_optional, UserClaims, AuthService  # noqa: E402
+from .utils.client_auth import get_user_client_role, check_client_access, require_client_role
 
 # Re-export auth dependencies for easy access
 __all__ = ["get_current_user", "get_current_user_optional", "UserClaims"]
@@ -162,17 +163,60 @@ async def get_user_client_access(
 ) -> list[str]:
     """
     Get list of client IDs that the user has access to.
-    This will be used to filter data based on user permissions.
+    Uses the new client_members table for many-to-many relationships.
     """
     try:
-        # Query clients where user has access
+        # Query client_members where user is an accepted member
         response = (
-            await db.table("clients").select("id").eq("user_id", user.user_id).execute()
+            await db.table("client_members")
+            .select("client_id")
+            .eq("user_id", user.user_id)
+            .not_.is_("accepted_at", "null")
+            .execute()
         )
-        return [client["id"] for client in response.data]
+        return [member["client_id"] for member in response.data]
     except Exception as e:
         logger.error(f"Failed to get user client access: {e}")
         return []
+
+
+# Client role-based authorization dependencies
+
+
+async def require_client_access(
+    client_id: str,
+    user: UserClaims = Depends(get_current_user),
+    db: Client = Depends(get_db)
+) -> dict:
+    """
+    Require user to have access to a specific client.
+    Returns access info including role and permissions.
+    """
+    return await check_client_access(db, client_id, user.user_id)
+
+
+async def require_client_owner(
+    client_id: str,
+    user: UserClaims = Depends(get_current_user),
+    db: Client = Depends(get_db)
+) -> str:
+    """
+    Require user to be an owner of the client.
+    Returns the user's role (should be 'owner').
+    """
+    return await require_client_role(db, client_id, user.user_id, "owner")
+
+
+async def require_client_admin_or_owner(
+    client_id: str,
+    user: UserClaims = Depends(get_current_user),
+    db: Client = Depends(get_db)
+) -> str:
+    """
+    Require user to be at least admin of the client.
+    Returns the user's actual role.
+    """
+    return await require_client_role(db, client_id, user.user_id, "admin")
 
 
 # Secret key dependency (only for background workers)

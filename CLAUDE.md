@@ -84,25 +84,20 @@ Each perspective represents a major feature:
 ## Supabase Development
 
 ### Branch Configuration
-- **Dev Branch Project ID**: `gzprcujfksbnqixojjdg` 
+- **Dev Branch Project ID**: `tqjyyedrazaimtujdjrw` 
 - **Main Branch Project ID**: `dmfniygxoaijrnjornaq` (DO NOT USE)
 - ALWAYS use the dev branch project ID for all Supabase operations
 
 ### Database Management
 
-#### Reading Database Structure:
+#### Reading Database:
 - Use Supabase MCP (READ-ONLY) to inspect current database state
-- Available MCP tools for reading:
-  - `list_tables` - View all tables and their structure
-  - `execute_sql` - Run SELECT queries to inspect data
-  - `list_migrations` - See applied migrations
-  - `get_advisors` - Check for security/performance issues
 
 #### Making Database Changes:
 1. **Inspect current state** using Supabase MCP read operations
 2. **Create migration file** in `/supabase/migrations/` with timestamp prefix (e.g., `20250128_add_user_profiles.sql`)
 3. **Write SQL changes** in the migration file
-4. **Apply migration** to dev branch via Supabase MCP `apply_migration` tool
+4. **Apply migration** will be applied when pushing all changes to the remote dev branch in github
 5. **Test thoroughly** before committing
 
 #### Migration Guidelines:
@@ -112,11 +107,5 @@ Each perspective represents a major feature:
   - Idempotent (safe to run multiple times)
   - Include both schema changes and data migrations if needed
   - Well-commented explaining the changes
-
-#### Current Tables:
-- `clients` - Client organizations
-- `campaigns` - Marketing campaigns  
-- `leads` - Campaign prospects
-- `messages` - Outreach messages
 
 IMPORTANT: The Supabase MCP is READ-ONLY for safety. All modifications must go through proper migration files.
