@@ -158,7 +158,8 @@ class EmailSender(BaseTools):
             if reply_to_domain:
                 reply_to_email = f"reply+{message_data['id']}@{reply_to_domain}"
                 message.reply_to = Email(reply_to_email)
-                message.add_header('Message-ID', f"<{message_data['id']}@{reply_to_domain}>")
+                # In newer SDK, headers are set as attributes
+                message.header = {'Message-ID': f"<{message_data['id']}@{reply_to_domain}>"}
             
             # Send the email
             response = sg_client.send(message)
@@ -363,15 +364,19 @@ class EmailSender(BaseTools):
                 substitutions = self._get_personalization_substitutions(lead_data)
                 personalization.dynamic_template_data = substitutions
                 
-                # Add tracking
-                personalization.add_custom_arg('message_id', str(msg['id']))
-                personalization.add_custom_arg('campaign_id', str(msg.get('campaign_id', '')))
-                personalization.add_custom_arg('lead_id', str(msg.get('lead_id', '')))
+                # Add tracking - in newer SDK, custom args are set as a dict
+                personalization.custom_args = {
+                    'message_id': str(msg['id']),
+                    'campaign_id': str(msg.get('campaign_id', '')),
+                    'lead_id': str(msg.get('lead_id', ''))
+                }
                 
-                # Reply-To header
+                # Reply-To header - in newer SDK, headers are set as a dict
                 if reply_to_domain:
-                    personalization.add_header('Reply-To', f"reply+{msg['id']}@{reply_to_domain}")
-                    personalization.add_header('Message-ID', f"<{msg['id']}@{reply_to_domain}>")
+                    personalization.headers = {
+                        'Reply-To': f"reply+{msg['id']}@{reply_to_domain}",
+                        'Message-ID': f"<{msg['id']}@{reply_to_domain}>"
+                    }
                 
                 mail.add_personalization(personalization)
             
