@@ -137,7 +137,7 @@ async def health_check():
     try:
         client = await get_supabase()
         # Simple query to verify connection
-        await client.table("_test_connection").select("1").limit(1).execute()
+        await client.table("_test_connection").select("status").limit(1).execute()
         health_status["checks"]["supabase"] = "ok"
     except Exception as e:
         health_status["status"] = "unhealthy"
