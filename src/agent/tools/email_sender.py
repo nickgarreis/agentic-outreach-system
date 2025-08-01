@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # SendGrid imports
 try:
     from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail, Email, To, Content, Personalization, From
+    from sendgrid.helpers.mail import Mail, Email, To, Content, Personalization, From, CustomArg, Header
 except ImportError:
     SendGridAPIClient = None
     Mail = None
@@ -151,18 +151,16 @@ class EmailSender(BaseTools):
             personalization.add_to(To(lead_data['email']))
             
             # Add custom args for tracking
-            personalization.custom_args = {
-                'message_id': str(message_data['id']),
-                'campaign_id': str(message_data.get('campaign_id', '')),
-                'lead_id': str(message_data.get('lead_id', ''))
-            }
+            personalization.add_custom_arg(CustomArg('message_id', str(message_data['id'])))
+            personalization.add_custom_arg(CustomArg('campaign_id', str(message_data.get('campaign_id', ''))))
+            personalization.add_custom_arg(CustomArg('lead_id', str(message_data.get('lead_id', ''))))
             
             # Add Reply-To if configured
             if reply_to_domain:
                 reply_to_email = f"reply+{message_data['id']}@{reply_to_domain}"
                 message.reply_to = Email(reply_to_email)
-                # In newer SDK, headers are set on personalization
-                personalization.headers = {'Message-ID': f"<{message_data['id']}@{reply_to_domain}>"}
+                # Add headers using Header objects
+                personalization.add_header(Header('Message-ID', f"<{message_data['id']}@{reply_to_domain}>"))
             
             message.add_personalization(personalization)
             
@@ -367,19 +365,15 @@ class EmailSender(BaseTools):
                 # Note: We're not using dynamic templates, so we don't need dynamic_template_data
                 # The content is already personalized in the message content
                 
-                # Add tracking - in newer SDK, custom args are set as a dict
-                personalization.custom_args = {
-                    'message_id': str(msg['id']),
-                    'campaign_id': str(msg.get('campaign_id', '')),
-                    'lead_id': str(msg.get('lead_id', ''))
-                }
+                # Add tracking using CustomArg objects
+                personalization.add_custom_arg(CustomArg('message_id', str(msg['id'])))
+                personalization.add_custom_arg(CustomArg('campaign_id', str(msg.get('campaign_id', ''))))
+                personalization.add_custom_arg(CustomArg('lead_id', str(msg.get('lead_id', ''))))
                 
-                # Reply-To header - in newer SDK, headers are set as a dict
+                # Reply-To header using Header objects
                 if reply_to_domain:
-                    personalization.headers = {
-                        'Reply-To': f"reply+{msg['id']}@{reply_to_domain}",
-                        'Message-ID': f"<{msg['id']}@{reply_to_domain}>"
-                    }
+                    personalization.add_header(Header('Reply-To', f"reply+{msg['id']}@{reply_to_domain}"))
+                    personalization.add_header(Header('Message-ID', f"<{msg['id']}@{reply_to_domain}>"))
                 
                 mail.add_personalization(personalization)
             
