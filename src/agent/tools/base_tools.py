@@ -4,7 +4,8 @@
 # RELEVANT FILES: database_tools.py, web_tools.py, ../autopilot_agent.py
 
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
+from dataclasses import dataclass
 from ...database import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -59,3 +60,52 @@ class BaseTools:
         if details:
             success_msg += f" | {details}"
         self.logger.info(success_msg)
+
+
+@dataclass
+class ToolResult:
+    """
+    Standard result format for all tool executions.
+    
+    Attributes:
+        success: Whether the tool execution succeeded
+        data: Any data returned by the tool
+        message: Human-readable message about the result
+        error: Error message if success is False
+    """
+    success: bool
+    data: Optional[Dict[str, Any]] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+
+
+class BaseTool:
+    """
+    Base class for individual tools (not tool categories).
+    Each tool should inherit from this class.
+    """
+    
+    def __init__(self, name: str, description: str):
+        """
+        Initialize a tool with name and description.
+        
+        Args:
+            name: Unique name for the tool
+            description: What the tool does
+        """
+        self.name = name
+        self.description = description
+        self.logger = logging.getLogger(f"Tool.{name}")
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        """
+        Execute the tool with given parameters.
+        Must be implemented by each tool.
+        
+        Args:
+            **kwargs: Tool-specific parameters
+            
+        Returns:
+            ToolResult with execution outcome
+        """
+        raise NotImplementedError("Each tool must implement execute method")

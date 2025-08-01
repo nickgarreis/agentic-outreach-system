@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # AgentOps configuration (for agent monitoring and observability)
     agentops_api_key: Optional[str] = None
 
+    # Apollo API configuration
+    apollo_api_key: Optional[str] = None
+
     # Render deployment settings
     render_service_name: Optional[str] = None
     render_service_id: Optional[str] = None
