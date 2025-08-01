@@ -180,17 +180,8 @@ class AutopilotAgent:
                 # Extract lead information
                 lead_info = self.apollo_search._extract_lead_data(lead_data)
                 
-                # Check if lead already exists (by email)
-                if lead_info.get("email"):
-                    existing = await supabase.table("leads").select("id").eq(
-                        "email", lead_info["email"]
-                    ).eq("campaign_id", campaign_id).execute()
-                    
-                    if existing.data:
-                        duplicate_leads += 1
-                        continue
-                
                 # Enrich lead data if we have basic info
+                enriched_email = None
                 if lead_info.get("first_name") or lead_info.get("email"):
                     try:
                         enriched = await self.apollo_enrich.execute(
@@ -202,7 +193,12 @@ class AutopilotAgent:
                         )
                         
                         if enriched.success and enriched.data:
+                            # Get the enriched email for deduplication
+                            enriched_email = enriched.data.get("email")
+                            
                             # Merge enriched data
+                            if enriched_email:
+                                lead_info["email"] = enriched_email
                             if require_phone and enriched.data.get("phone"):
                                 lead_info["phone"] = enriched.data["phone"]
                             
@@ -214,6 +210,17 @@ class AutopilotAgent:
                     except Exception as e:
                         logger.warning(f"Failed to enrich lead {lead_info.get('email')}: {e}")
                         # Continue without enrichment
+                
+                # Check for duplicates using enriched email (if available) or original email
+                email_to_check = enriched_email or lead_info.get("email")
+                if email_to_check:
+                    existing = await supabase.table("leads").select("id").eq(
+                        "email", email_to_check
+                    ).eq("campaign_id", campaign_id).execute()
+                    
+                    if existing.data:
+                        duplicate_leads += 1
+                        continue
                 
                 # Add source tracking
                 lead_info["full_context"]["source"] = "apollo_search"
