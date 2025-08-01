@@ -260,3 +260,99 @@ async def update_campaign_metrics(
         
     except Exception as e:
         logger.error(f"Failed to update campaign metrics: {e}")
+
+
+@router.post("/sendgrid-inbound")
+async def handle_sendgrid_inbound_webhook(request: Request):
+    """
+    Handle SendGrid Inbound Parse webhook for receiving emails from leads.
+    
+    This endpoint processes emails sent to our reply domain and creates
+    inbound message records linked to the appropriate lead and campaign.
+    
+    SendGrid sends multipart/form-data with parsed email content.
+    """
+    try:
+        # Parse form data from SendGrid
+        form_data = await request.form()
+        
+        # Extract email fields
+        from_email = form_data.get('from', '')
+        to_email = form_data.get('to', '')
+        subject = form_data.get('subject', '')
+        text_content = form_data.get('text', '')
+        html_content = form_data.get('html', '')
+        headers = form_data.get('headers', '')
+        
+        # Parse sender email address (handle format: "Name <email@domain.com>")
+        import re
+        email_match = re.search(r'<(.+?)>', from_email)
+        if email_match:
+            sender_email = email_match.group(1)
+        else:
+            # Assume the whole string is the email
+            sender_email = from_email.strip()
+        
+        # Extract Message-ID and In-Reply-To from headers
+        message_id = None
+        in_reply_to = None
+        if headers:
+            # Parse Message-ID
+            message_id_match = re.search(r'Message-ID:\s*<(.+?)>', headers, re.IGNORECASE)
+            if message_id_match:
+                message_id = f"<{message_id_match.group(1)}>"
+            
+            # Parse In-Reply-To
+            reply_to_match = re.search(r'In-Reply-To:\s*<(.+?)>', headers, re.IGNORECASE)
+            if reply_to_match:
+                in_reply_to = f"<{reply_to_match.group(1)}>"
+        
+        # Prepare content (prefer HTML if available)
+        content = html_content if html_content else text_content
+        
+        # Log the incoming email
+        logger.info(f"Received inbound email from {sender_email} to {to_email}")
+        
+        # Get Supabase client
+        supabase = await get_supabase()
+        
+        # Build SendGrid data for storage
+        sendgrid_data = {
+            "to": to_email,
+            "from": from_email,
+            "subject": subject,
+            "headers": headers[:1000] if headers else None,  # Truncate headers for storage
+            "spam_score": form_data.get('spam_score'),
+            "spam_report": form_data.get('spam_report'),
+            "attachments": form_data.get('attachments', '0')
+        }
+        
+        # Call the database function to process the email
+        result = await supabase.rpc('process_inbound_email', {
+            'p_from_email': sender_email,
+            'p_to_email': to_email,
+            'p_subject': subject,
+            'p_content': content,
+            'p_message_id': message_id,
+            'p_in_reply_to': in_reply_to,
+            'p_sendgrid_data': sendgrid_data
+        }).execute()
+        
+        # Check if email was processed
+        if result.data:
+            message_id = result.data
+            logger.info(f"Inbound email processed successfully. Message ID: {message_id}")
+            
+            # TODO: Optionally trigger a job to have AI respond to the email
+            # This could be done by creating a job record for the AutopilotAgent
+            
+            return Response(status_code=200)
+        else:
+            # Email was rejected (not from a known lead or other validation failure)
+            logger.warning(f"Inbound email rejected from {sender_email}")
+            return Response(status_code=200)  # Still return 200 to prevent SendGrid retries
+    
+    except Exception as e:
+        logger.error(f"SendGrid inbound webhook error: {e}")
+        # Return 200 to prevent SendGrid from retrying
+        return Response(status_code=200)
