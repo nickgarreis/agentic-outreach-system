@@ -59,6 +59,8 @@ envVarGroups:
         value: https://openrouter.ai/api/v1
       - key: AGENTOPS_API_KEY
         value: 355ddee1-57fb-44ee-b45a-83fbb05503c8
+      - key: APOLLO_API_KEY
+        value: iOssre939n8k0pnVics_1Q
       - key: APP_NAME
         value: "Agentic Outreach Worker"
   
@@ -77,6 +79,8 @@ envVarGroups:
         value: https://openrouter.ai/api/v1
       - key: AGENTOPS_API_KEY
         value: 355ddee1-57fb-44ee-b45a-83fbb05503c8
+      - key: APOLLO_API_KEY
+        value: iOssre939n8k0pnVics_1Q
       - key: APP_NAME
         value: "Agentic Outreach Worker Dev"
 
