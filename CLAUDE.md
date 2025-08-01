@@ -112,76 +112,152 @@ IMPORTANT: The Supabase MCP is READ-ONLY for safety. All modifications must go t
 
 ## PostgreSQL Enum Migration Best Practices
 
-### Converting Text Columns to Enum - The Bulletproof Way
-When converting a text column to an enum type, use this comprehensive idempotent pattern:
+### Converting Text Columns to Enum - The Complete Reset Approach
+After extensive testing, the most reliable way to convert text columns to enum is the complete reset approach:
 
-#### Complete Migration Template
+#### Working Migration Template (Tested and Proven)
 ```sql
--- 1. Create enum type (idempotent)
+-- Step 1: Clean up any partial migration state
 DO $$
+DECLARE
+    constraint_name text;
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'my_enum') THEN
-        CREATE TYPE my_enum AS ENUM ('value1', 'value2', 'value3');
-    END IF;
-END$$;
-
--- 2. Create implicit cast for safety (prevents "operator does not exist" errors)
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_cast 
-        WHERE castsource = 'varchar'::regtype 
-        AND casttarget = 'my_enum'::regtype
-    ) THEN
-        CREATE CAST (varchar AS my_enum) WITH INOUT AS IMPLICIT;
-    END IF;
-END$$;
-
--- 3. Convert column only if it's still text type
-DO $$
-BEGIN
+    -- Drop all dependent objects
+    DROP VIEW IF EXISTS dependent_view_name CASCADE;
+    DROP TRIGGER IF EXISTS related_trigger ON table_name;
+    DROP FUNCTION IF EXISTS related_function() CASCADE;
+    
+    -- Check if column is already enum and convert back to text
     IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public'
-        AND table_name = 'my_table' 
-        AND column_name = 'my_column' 
-        AND data_type = 'text'
+        SELECT 1 FROM pg_attribute a
+        JOIN pg_class c ON a.attrelid = c.oid
+        JOIN pg_type t ON a.atttypid = t.oid
+        WHERE c.relname = 'my_table'
+        AND a.attname = 'my_column'
+        AND t.typname = 'my_enum'
     ) THEN
-        -- Drop dependent views
-        DROP VIEW IF EXISTS dependent_view_name;
-        
-        -- Drop existing default
-        EXECUTE 'ALTER TABLE my_table ALTER COLUMN my_column DROP DEFAULT';
-        
-        -- Update invalid values
-        UPDATE my_table 
-        SET my_column = 'value1' 
-        WHERE my_column NOT IN ('value1', 'value2', 'value3');
-        
-        -- Convert with double casting (CRITICAL: use ::text::enum_type)
-        EXECUTE 'ALTER TABLE my_table ALTER COLUMN my_column TYPE my_enum USING my_column::text::my_enum';
-        
-        -- Set new default
-        EXECUTE 'ALTER TABLE my_table ALTER COLUMN my_column SET DEFAULT ''value1''::my_enum';
-        
-        -- Recreate views
-        -- ... recreate any dropped views here
+        ALTER TABLE my_table ALTER COLUMN my_column DROP DEFAULT;
+        ALTER TABLE my_table ALTER COLUMN my_column TYPE text USING my_column::text;
     END IF;
+    
+    -- Drop CHECK constraints on the column
+    FOR constraint_name IN 
+        SELECT con.conname
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = ANY(con.conkey)
+        WHERE rel.relname = 'my_table' AND att.attname = 'my_column' AND con.contype = 'c'
+    LOOP
+        EXECUTE format('ALTER TABLE my_table DROP CONSTRAINT IF EXISTS %I', constraint_name);
+    END LOOP;
+    
+    -- Drop enum type and casts
+    DROP CAST IF EXISTS (varchar AS my_enum);
+    DROP CAST IF EXISTS (text AS my_enum);
+    DROP TYPE IF EXISTS my_enum CASCADE;
 END$$;
+
+-- Step 2: Update invalid values BEFORE creating enum (CRITICAL ORDER!)
+UPDATE my_table 
+SET my_column = 'default_value' 
+WHERE my_column NOT IN ('value1', 'value2', 'value3');
+
+-- Step 3: Create the enum type
+CREATE TYPE my_enum AS ENUM ('value1', 'value2', 'value3');
+
+-- Step 4: Drop indexes on the column (prevents conversion issues)
+DO $$
+DECLARE
+    idx_name text;
+BEGIN
+    FOR idx_name IN 
+        SELECT indexname FROM pg_indexes 
+        WHERE tablename = 'my_table' AND indexdef LIKE '%my_column%'
+    LOOP
+        EXECUTE format('DROP INDEX IF EXISTS %I', idx_name);
+    END LOOP;
+END$$;
+
+-- Step 5: Convert the column
+ALTER TABLE my_table 
+    ALTER COLUMN my_column DROP DEFAULT,
+    ALTER COLUMN my_column TYPE my_enum USING my_column::text::my_enum,
+    ALTER COLUMN my_column SET DEFAULT 'default_value'::my_enum;
+
+-- Step 6: Recreate indexes, views, etc.
+CREATE INDEX IF NOT EXISTS idx_my_table_my_column ON my_table(my_column);
+-- Recreate any dropped views here
 ```
 
-### Critical Points to Remember
-1. **Always use double casting**: `USING column::text::enum_type` (not just `column::enum_type`)
-2. **Create implicit casts**: Prevents "operator does not exist: enum_type = text" errors
-3. **Make everything idempotent**: Use DO blocks with existence checks
-4. **Handle view dependencies**: Drop before altering, recreate after
-5. **Use EXECUTE for dynamic SQL**: Inside DO blocks, use EXECUTE for DDL statements
+### Critical Lessons Learned
+
+#### 1. Order Matters - Update BEFORE Creating Enum
+**NEVER** create the enum type before updating invalid values. This causes:
+```
+ERROR: operator does not exist: enum_type = text
+```
+Always update values while the column is still text type.
+
+#### 2. Complete Reset is More Reliable Than Partial Fixes
+Trying to handle partial states with complex logic often fails. Instead:
+- Drop everything related to the enum
+- Start fresh with a clean state
+- This approach works in all scenarios
+
+#### 3. Double Casting is Essential
+Always use `::text::enum_type` not just `::enum_type`:
+```sql
+-- WRONG - can cause errors
+USING my_column::my_enum
+
+-- CORRECT - always works
+USING my_column::text::my_enum
+```
+
+#### 4. Avoid Complex CASE Statements in USING Clause
+CASE statements in the USING clause can cause comparison errors:
+```sql
+-- WRONG - causes "operator does not exist" errors
+USING CASE 
+    WHEN status = 'draft' THEN 'draft'::my_enum
+    ...
+END;
+
+-- CORRECT - simple double cast
+USING status::text::my_enum
+```
+
+#### 5. Handle All Dependencies
+Before altering a column:
+- Drop views that use the column
+- Drop triggers on the table
+- Drop CHECK constraints on the column
+- Drop indexes on the column
+- Drop functions that reference the column
 
 ### Common Error Solutions
-- **"operator does not exist: enum_type = text"**: Create implicit cast or use double casting
-- **"default for column cannot be cast automatically"**: Drop default before conversion
-- **"cannot alter type of a column used by a view"**: Drop view before altering column
-- **"invalid input value for enum"**: Update invalid values before conversion
+- **"operator does not exist: enum_type = text"**: 
+  - Happens when enum exists but column is text
+  - Update values BEFORE creating enum
+  - Use complete reset approach
+  
+- **"default for column cannot be cast automatically"**: 
+  - Always drop default before type conversion
+  - Re-add default after conversion
+  
+- **"cannot alter type of a column used by a view"**: 
+  - Drop all dependent views first
+  - Query pg_depend to find dependencies
+  
+- **"invalid input value for enum"**: 
+  - Update invalid values before conversion
+  - Use a safe default value
+
+### Testing Your Migration
+Always test by running the migration:
+1. On a fresh database
+2. On a database with partial migration state
+3. Multiple times in a row (idempotency test)
 
 ### Handling View Dependencies
 When altering a column that's used by a view, PostgreSQL will error with "cannot alter type of a column used by a view or rule". You must:
