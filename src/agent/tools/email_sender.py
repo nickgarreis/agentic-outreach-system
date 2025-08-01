@@ -142,13 +142,16 @@ class EmailSender(BaseTools):
             # Create SendGrid message
             message = Mail(
                 from_email=From(from_email, from_name),
-                to_emails=To(lead_data['email']),
                 subject=self._personalize_text(message_data.get('subject', ''), lead_data),
                 html_content=Content("text/html", formatted_content)
             )
             
+            # Create personalization for tracking and headers
+            personalization = Personalization()
+            personalization.add_to(To(lead_data['email']))
+            
             # Add custom args for tracking
-            message.custom_args = {
+            personalization.custom_args = {
                 'message_id': str(message_data['id']),
                 'campaign_id': str(message_data.get('campaign_id', '')),
                 'lead_id': str(message_data.get('lead_id', ''))
@@ -158,8 +161,10 @@ class EmailSender(BaseTools):
             if reply_to_domain:
                 reply_to_email = f"reply+{message_data['id']}@{reply_to_domain}"
                 message.reply_to = Email(reply_to_email)
-                # In newer SDK, headers are set as attributes
-                message.header = {'Message-ID': f"<{message_data['id']}@{reply_to_domain}>"}
+                # In newer SDK, headers are set on personalization
+                personalization.headers = {'Message-ID': f"<{message_data['id']}@{reply_to_domain}>"}
+            
+            message.add_personalization(personalization)
             
             # Send the email
             response = sg_client.send(message)
