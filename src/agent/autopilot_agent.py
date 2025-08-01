@@ -709,7 +709,7 @@ class AutopilotAgent:
             enriched = await self.apollo_enrich.execute(
                 first_name=lead_data.get("first_name"),
                 last_name=lead_data.get("last_name"),
-                email=lead_data.get("email"),
+                email=None,  # Don't pass placeholder email
                 organization_name=lead_data.get("company"),
                 reveal_phone_number=require_phone
             )
