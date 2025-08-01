@@ -14,7 +14,7 @@ from .config import get_settings
 from .schemas import BaseResponse
 from .middleware import setup_middleware
 from .auth import get_validator
-from .routers import auth_router, client_members_router
+from .routers import auth_router, client_members_router, webhooks
 from .agent.agentops_config import init_agentops
 
 # Configure logging
@@ -164,6 +164,9 @@ app.include_router(auth_router)
 
 # Client member management routes
 app.include_router(client_members_router)
+
+# Webhook routes (no auth required for external services)
+app.include_router(webhooks.router, prefix="/api", tags=["webhooks"])
 
 # Future routers will be added here:
 # app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"])

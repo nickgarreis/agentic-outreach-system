@@ -668,6 +668,7 @@ class DatabaseTools(BaseTools):
                 "success": True,
                 "created": len(response.data),
                 "message_ids": [m["id"] for m in response.data],
+                "messages": response.data  # Return full message data with IDs
             }
         except Exception as e:
             logger.error(f"Failed to bulk schedule messages: {e}")

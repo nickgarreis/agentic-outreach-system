@@ -106,11 +106,16 @@ class RenderWorker:
             dict: Job data or None if no jobs available
         """
         try:
-            # Query for pending jobs, ordered by priority and created_at
+            # Query for pending jobs that are ready to run
+            # Include jobs where scheduled_for is null or <= current time
+            now = datetime.utcnow().isoformat()
+            
             response = await self.supabase.table("jobs")\
                 .select("*")\
                 .eq("status", "pending")\
+                .or_(f"scheduled_for.is.null,scheduled_for.lte.{now}")\
                 .order("priority", desc=True)\
+                .order("scheduled_for")\
                 .order("created_at")\
                 .limit(1)\
                 .execute()

@@ -10,6 +10,7 @@ import pytz
 
 from ..agentops_config import track_tool
 from .base_tools import BaseTools, ToolResult
+from ...database import get_supabase
 
 logger = logging.getLogger(__name__)
 
@@ -432,3 +433,114 @@ class MessageScheduler(BaseTools):
                 success=False,
                 error=f"Failed to get availability: {str(e)}"
             )
+    
+    async def _create_email_jobs(
+        self,
+        scheduled_messages: List[Dict[str, Any]],
+        campaign_id: str
+    ) -> Dict[str, Any]:
+        """
+        Create send_email jobs for scheduled email messages.
+        Groups messages by send time (within 5-minute windows) for efficient batch sending.
+        
+        Args:
+            scheduled_messages: List of scheduled message records
+            campaign_id: Campaign UUID
+            
+        Returns:
+            dict: Results of job creation
+        """
+        try:
+            # Filter only email messages
+            email_messages = [
+                msg for msg in scheduled_messages 
+                if msg.get('channel') == 'email'
+            ]
+            
+            if not email_messages:
+                return {
+                    "jobs_created": 0,
+                    "messages_grouped": 0,
+                    "job_ids": []
+                }
+            
+            # Group messages by 5-minute time windows
+            time_groups = {}
+            for msg in email_messages:
+                send_at = datetime.fromisoformat(msg['send_at'].replace('Z', '+00:00'))
+                # Round to nearest 5 minutes
+                window_start = send_at.replace(
+                    minute=(send_at.minute // 5) * 5,
+                    second=0,
+                    microsecond=0
+                )
+                
+                if window_start not in time_groups:
+                    time_groups[window_start] = []
+                time_groups[window_start].append(msg)
+            
+            # Create jobs for each time group
+            supabase = await get_supabase()
+            job_ids = []
+            messages_with_jobs = []
+            
+            for send_time, messages in time_groups.items():
+                # Extract message IDs
+                message_ids = [msg['id'] for msg in messages if 'id' in msg]
+                
+                # Create job data
+                job_data = {
+                    "job_type": "send_email",
+                    "priority": "high",  # Email sending is high priority
+                    "status": "pending",
+                    "scheduled_for": send_time.isoformat(),
+                    "data": {
+                        "campaign_id": campaign_id,
+                        "message_ids": message_ids,
+                        "batch_size": len(message_ids),
+                        "scheduled_send_time": send_time.isoformat()
+                    },
+                    "created_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.utcnow().isoformat()
+                }
+                
+                # Insert job
+                job_response = await supabase.table("jobs").insert(job_data).execute()
+                
+                if job_response.data and len(job_response.data) > 0:
+                    job_id = job_response.data[0]['id']
+                    job_ids.append(job_id)
+                    
+                    # Track which messages are associated with this job
+                    for msg in messages:
+                        if 'id' in msg:
+                            messages_with_jobs.append({
+                                'message_id': msg['id'],
+                                'job_id': job_id
+                            })
+                    
+                    self.logger.info(
+                        f"Created email job {job_id} for {len(message_ids)} messages "
+                        f"scheduled at {send_time}"
+                    )
+            
+            # Update messages with job_id references
+            for msg_job in messages_with_jobs:
+                await supabase.table("messages").update({
+                    "job_id": msg_job['job_id']
+                }).eq("id", msg_job['message_id']).execute()
+            
+            return {
+                "jobs_created": len(job_ids),
+                "messages_grouped": len(email_messages),
+                "job_ids": job_ids,
+                "time_windows": len(time_groups)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create email jobs: {e}")
+            return {
+                "jobs_created": 0,
+                "messages_grouped": 0,
+                "error": str(e)
+            }

@@ -13,7 +13,7 @@ from ..config import get_settings
 from .agentops_config import (
     track_operation,
 )
-from .tools import DatabaseTools, ApolloSearchTool, ApolloEnrichTool, TavilyTool, OutreachGenerator, MessageScheduler
+from .tools import DatabaseTools, ApolloSearchTool, ApolloEnrichTool, TavilyTool, OutreachGenerator, MessageScheduler, EmailSender
 from ..database import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ class AutopilotAgent:
         self.tavily_tool = TavilyTool()
         self.outreach_generator = OutreachGenerator()
         self.message_scheduler = MessageScheduler()
+        self.email_sender = EmailSender()
 
         # For backwards compatibility
         self.tools = self.db_tools
@@ -86,6 +87,8 @@ class AutopilotAgent:
                 result = await self._handle_lead_research(job_data)
             elif self.job_type == "lead_outreach":
                 result = await self._handle_lead_outreach(job_data)
+            elif self.job_type == "send_email":
+                result = await self._handle_send_email(job_data)
             else:
                 # Unknown job type
                 result = {
@@ -471,16 +474,31 @@ class AutopilotAgent:
         scheduled_messages = scheduling_result.data.get("scheduled_messages", [])
         
         # Bulk create messages in database
+        messages_with_ids = []
         if scheduled_messages:
             create_result = await self.db_tools.bulk_schedule_messages(scheduled_messages)
             
             if not create_result.get("success"):
                 raise Exception(f"Failed to create messages: {create_result.get('error')}")
             
+            # Get the created messages with their IDs
+            messages_with_ids = create_result.get("messages", [])
+            
             logger.info(
                 f"Successfully created {create_result.get('created')} messages "
                 f"for lead {lead_id}"
             )
+            
+            # Create email jobs for the scheduled messages
+            if messages_with_ids:
+                email_job_results = await self.message_scheduler._create_email_jobs(
+                    messages_with_ids, 
+                    campaign_id
+                )
+                logger.info(
+                    f"Created {email_job_results.get('jobs_created', 0)} email jobs "
+                    f"for {email_job_results.get('messages_grouped', 0)} messages"
+                )
         
         # Get campaign metrics for reporting
         metrics = await self.db_tools.get_campaign_sending_metrics(campaign_id, days=7)
@@ -494,4 +512,172 @@ class AutopilotAgent:
             "scheduling_log": scheduling_result.data.get("scheduling_log", []),
             "campaign_metrics": metrics,
             "status": "outreach_scheduled"
+        }
+    
+    @track_operation("handle_send_email")
+    async def _handle_send_email(self, job_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle send_email job type - send emails via SendGrid.
+        
+        Args:
+            job_data: Contains campaign_id and message_ids
+            
+        Returns:
+            dict: Job execution results including send status
+        """
+        campaign_id = job_data.get("campaign_id")
+        message_ids = job_data.get("message_ids", [])
+        
+        if not campaign_id or not message_ids:
+            raise Exception("campaign_id and message_ids are required for send_email job")
+        
+        logger.info(f"Starting email send for {len(message_ids)} messages in campaign {campaign_id}")
+        
+        # Get campaign data including SendGrid API key and sender settings
+        supabase = await get_supabase()
+        campaign_response = await supabase.table("campaigns").select(
+            "id, name, sendgrid_api_key, email_footer, from_email, from_name"
+        ).eq("id", campaign_id).single().execute()
+        
+        if not campaign_response.data:
+            raise Exception(f"Campaign {campaign_id} not found")
+        
+        campaign_data = campaign_response.data
+        sendgrid_api_key = campaign_data.get("sendgrid_api_key")
+        
+        if not sendgrid_api_key:
+            raise Exception(f"No SendGrid API key configured for campaign {campaign_data.get('name')}")
+        
+        # Get messages to send
+        messages_response = await supabase.table("messages").select("*").in_(
+            "id", message_ids
+        ).eq("status", "scheduled").eq("channel", "email").execute()
+        
+        if not messages_response.data:
+            logger.warning(f"No scheduled email messages found for IDs: {message_ids}")
+            return {
+                "campaign_id": campaign_id,
+                "messages_processed": 0,
+                "sent": 0,
+                "failed": 0,
+                "status": "no_messages"
+            }
+        
+        messages = messages_response.data
+        logger.info(f"Found {len(messages)} email messages to send")
+        
+        # Send emails in batch with campaign sender settings
+        send_result = await self.email_sender.send_batch_emails(
+            messages=messages,
+            api_key=sendgrid_api_key,
+            campaign_footer=campaign_data.get("email_footer"),
+            from_email=campaign_data.get("from_email", "noreply@example.com"),
+            from_name=campaign_data.get("from_name")
+        )
+        
+        if not send_result.success:
+            raise Exception(f"Failed to send emails: {send_result.error}")
+        
+        # Update message statuses based on results
+        send_data = send_result.data
+        results = send_data.get("results", [])
+        
+        # Separate successful and failed results
+        failed_results = []
+        for result in results:
+            message_id = result.get("message_id")
+            if result.get("sendgrid_message_id"):
+                # Successfully sent
+                await self.email_sender.update_message_status(
+                    message_id=message_id,
+                    status="sent",
+                    sendgrid_message_id=result.get("sendgrid_message_id")
+                )
+            else:
+                # Failed to send
+                error_msg = result.get("error", "Unknown error")
+                error_category = result.get("error_category", "unknown")
+                is_retryable = result.get("is_retryable", False)
+                
+                # Only mark as permanently failed if not retryable
+                status = "failed" if not is_retryable else "retry_pending"
+                
+                await self.email_sender.update_message_status(
+                    message_id=message_id,
+                    status=status,
+                    error=f"{error_msg} (Category: {error_category})"
+                )
+                
+                if is_retryable:
+                    failed_results.append(result)
+        
+        # Retry failed messages if any are retryable
+        retry_results = None
+        retry_details = []
+        if failed_results:
+            logger.info(f"Found {len(failed_results)} retryable failed messages")
+            retry_result = await self.email_sender.retry_failed_messages(
+                failed_results=failed_results,
+                messages=messages,
+                api_key=sendgrid_api_key,
+                campaign_footer=campaign_data.get("email_footer"),
+                from_email=campaign_data.get("from_email", "noreply@example.com"),
+                from_name=campaign_data.get("from_name")
+            )
+            if retry_result.success:
+                retry_results = retry_result.data
+                retry_details = retry_results.get("results", [])
+                
+                # Update message statuses based on retry results
+                for retry_msg in retry_details:
+                    message_id = retry_msg.get("message_id")
+                    if retry_msg.get("sendgrid_message_id"):
+                        # Retry succeeded
+                        await self.email_sender.update_message_status(
+                            message_id=message_id,
+                            status="sent",
+                            sendgrid_message_id=retry_msg.get("sendgrid_message_id")
+                        )
+                    else:
+                        # Retry failed permanently
+                        error_msg = retry_msg.get("error", "Retry failed")
+                        await self.email_sender.update_message_status(
+                            message_id=message_id,
+                            status="failed",
+                            error=f"Retry failed: {error_msg}"
+                        )
+        
+        # Calculate final statistics
+        initial_sent = send_data.get("sent", 0)
+        initial_failed = send_data.get("failed", 0)
+        retry_sent = retry_results.get("sent", 0) if retry_results else 0
+        retry_failed = retry_results.get("failed", 0) if retry_results else 0
+        
+        # Final counts
+        final_sent = initial_sent + retry_sent
+        final_failed = initial_failed - len(failed_results) + retry_failed  # Subtract retried, add retry failures
+        
+        logger.info(
+            f"Email send completed: {final_sent} sent, "
+            f"{final_failed} failed out of {len(messages)} messages"
+        )
+        
+        # Get pool statistics for monitoring
+        pool_stats = self.email_sender.get_pool_stats()
+        
+        return {
+            "campaign_id": campaign_id,
+            "campaign_name": campaign_data.get("name"),
+            "messages_processed": len(messages),
+            "initial_sent": initial_sent,
+            "initial_failed": initial_failed,
+            "retry_attempted": len(failed_results),
+            "retry_sent": retry_sent,
+            "retry_failed": retry_failed,
+            "final_sent": final_sent,
+            "final_failed": final_failed,
+            "results": results,
+            "retry_results": retry_results,
+            "pool_stats": pool_stats,
+            "status": "completed"
         }
