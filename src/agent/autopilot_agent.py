@@ -172,7 +172,6 @@ class AutopilotAgent:
         
         # Save leads to database
         leads_created = 0
-        duplicate_leads = 0
         supabase = await get_supabase()
         
         for lead_data in leads_data:
@@ -211,16 +210,6 @@ class AutopilotAgent:
                         logger.warning(f"Failed to enrich lead {lead_info.get('email')}: {e}")
                         # Continue without enrichment
                 
-                # Check for duplicates using enriched email (if available) or original email
-                email_to_check = enriched_email or lead_info.get("email")
-                if email_to_check:
-                    existing = await supabase.table("leads").select("id").eq(
-                        "email", email_to_check
-                    ).eq("campaign_id", campaign_id).execute()
-                    
-                    if existing.data:
-                        duplicate_leads += 1
-                        continue
                 
                 # Add source tracking
                 lead_info["full_context"]["source"] = "apollo_search"
@@ -235,7 +224,7 @@ class AutopilotAgent:
                 lead_info["campaign_id"] = campaign_id
                 lead_info["client_id"] = job_data.get("client_id")  # If provided
                 # Set status based on enrichment success
-                lead_info["status"] = "enriched" if lead_info["full_context"].get("enriched", False) else "enrichment_failed"
+                lead_info["status"] = "enriched" if lead_info["full_context"].get("enriched", False) else "discovered"
                 
                 await supabase.table("leads").insert(lead_info).execute()
                 leads_created += 1
@@ -258,12 +247,11 @@ class AutopilotAgent:
             except Exception as e:
                 logger.error(f"Failed to update campaign lead count: {e}")
         
-        logger.info(f"Lead discovery completed: {leads_created} new leads, {duplicate_leads} duplicates")
+        logger.info(f"Lead discovery completed: {leads_created} new leads created")
         
         return {
             "leads_found": len(leads_data),
             "leads_created": leads_created,
-            "duplicate_leads": duplicate_leads,
             "next_page": page_number + 1,
             "platform": "apollo"
         }
