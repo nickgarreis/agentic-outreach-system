@@ -217,7 +217,8 @@ class AutopilotAgent:
                 # Create new lead
                 lead_info["campaign_id"] = campaign_id
                 lead_info["client_id"] = job_data.get("client_id")  # If provided
-                lead_info["status"] = "new"
+                # Set status based on enrichment success
+                lead_info["status"] = "enriched" if lead_info["full_context"].get("enriched", False) else "enrichment_failed"
                 
                 await supabase.table("leads").insert(lead_info).execute()
                 leads_created += 1
