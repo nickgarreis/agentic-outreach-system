@@ -17,9 +17,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def create_test_campaign():
+async def create_test_campaign(require_phone: bool = False):
     """
     Create a test campaign with Apollo search URL configured.
+    
+    Args:
+        require_phone: Whether to require phone numbers in enrichment
     
     Returns:
         str: Campaign ID
@@ -43,6 +46,7 @@ async def create_test_campaign():
         "client_id": client_id,
         "name": f"Test Campaign - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         "status": "draft",
+        "require_phone_number": require_phone,
         "search_url": {
             "apollo": {
                 "search_url": "https://app.apollo.io/#/people/search?personTitles[]=CEO&personTitles[]=Founder&organizationNumEmployeesRanges[]=1-10&organizationNumEmployeesRanges[]=11-50",
@@ -170,12 +174,13 @@ async def simulate_job_execution(job_id: str):
         raise
 
 
-async def verify_results(campaign_id: str):
+async def verify_results(campaign_id: str, require_phone: bool = False):
     """
-    Verify that leads were created and page number was updated.
+    Verify that leads were created, enriched, and page number was updated.
     
     Args:
         campaign_id: Campaign UUID
+        require_phone: Whether phone numbers were required
     """
     supabase = await get_supabase()
     
@@ -186,20 +191,47 @@ async def verify_results(campaign_id: str):
     
     logger.info(f"Found {len(leads_response.data)} leads for campaign")
     
+    enriched_count = 0
+    with_phone_count = 0
+    
     if leads_response.data:
-        # Show first few leads
+        # Show first few leads and check enrichment
         for i, lead in enumerate(leads_response.data[:3]):
+            full_context = lead.get('full_context', {})
+            
+            # Check source tracking
+            if full_context.get('source') == 'apollo_search':
+                logger.info(f"✓ Lead {i+1} has correct source tracking")
+            
+            # Check enrichment
+            if full_context.get('enriched'):
+                enriched_count += 1
+                logger.info(f"✓ Lead {i+1} was enriched")
+            
+            # Check phone if required
+            if require_phone and lead.get('phone'):
+                with_phone_count += 1
+                
             logger.info(f"Lead {i+1}: {lead.get('first_name')} {lead.get('last_name')} - {lead.get('email')} ({lead.get('company')})")
+            if lead.get('phone'):
+                logger.info(f"  Phone: {lead.get('phone')}")
+            if full_context.get('personal_emails'):
+                logger.info(f"  Personal emails: {full_context['personal_emails']}")  
     
     # Check if page number was updated
-    campaign_response = await supabase.table("campaigns").select("search_url").eq(
+    campaign_response = await supabase.table("campaigns").select("search_url, total_leads_discovered").eq(
         "id", campaign_id
     ).single().execute()
     
     search_url = campaign_response.data.get("search_url", {})
     apollo_page = search_url.get("apollo", {}).get("page_number", 1)
+    total_discovered = campaign_response.data.get("total_leads_discovered", 0)
     
     logger.info(f"Apollo page number after execution: {apollo_page}")
+    logger.info(f"Total leads discovered counter: {total_discovered}")
+    logger.info(f"Enriched leads: {enriched_count}/{len(leads_response.data)}")
+    if require_phone:
+        logger.info(f"Leads with phone: {with_phone_count}/{len(leads_response.data)}")
     
     return len(leads_response.data)
 
@@ -236,9 +268,13 @@ async def main():
         return
     
     try:
+        # Test both with and without phone requirement
+        test_phone = True  # Set to True to test phone enrichment
+        
         # Step 1: Create test campaign
         logger.info("\n1. Creating test campaign...")
-        campaign_id = await create_test_campaign()
+        logger.info(f"Phone number requirement: {test_phone}")
+        campaign_id = await create_test_campaign(require_phone=test_phone)
         
         # Step 2: Activate campaign (triggers job creation)
         logger.info("\n2. Activating campaign...")
@@ -258,7 +294,7 @@ async def main():
         
         # Step 5: Verify results
         logger.info("\n5. Verifying results...")
-        lead_count = await verify_results(campaign_id)
+        lead_count = await verify_results(campaign_id, require_phone=test_phone)
         
         # Summary
         logger.info("\n=== Test Summary ===")

@@ -13,7 +13,7 @@ from ..config import get_settings
 from .agentops_config import (
     track_operation,
 )
-from .tools import DatabaseTools, ApolloSearchTool
+from .tools import DatabaseTools, ApolloSearchTool, ApolloEnrichTool
 from ..database import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ class AutopilotAgent:
         
         # Initialize individual tools
         self.apollo_search = ApolloSearchTool()
+        self.apollo_enrich = ApolloEnrichTool()
 
         # For backwards compatibility
         self.tools = self.db_tools
@@ -150,6 +151,15 @@ class AutopilotAgent:
         
         logger.info(f"Apollo search returned {len(leads_data)} leads")
         
+        # Get campaign settings for phone number requirement
+        campaign_response = await get_supabase()
+        campaign_data = await campaign_response.table("campaigns").select("require_phone_number").eq(
+            "id", campaign_id
+        ).single().execute()
+        require_phone = campaign_data.data.get("require_phone_number", False) if campaign_data.data else False
+        
+        logger.info(f"Phone number requirement: {require_phone}")
+        
         # Save leads to database
         leads_created = 0
         duplicate_leads = 0
@@ -170,6 +180,40 @@ class AutopilotAgent:
                         duplicate_leads += 1
                         continue
                 
+                # Enrich lead data if we have basic info
+                if lead_info.get("first_name") or lead_info.get("email"):
+                    try:
+                        enriched = await self.apollo_enrich.execute(
+                            first_name=lead_info.get("first_name"),
+                            last_name=lead_info.get("last_name"),
+                            email=lead_info.get("email"),
+                            organization_name=lead_info.get("company"),
+                            reveal_phone_number=require_phone
+                        )
+                        
+                        if enriched.success and enriched.data:
+                            # Merge enriched data
+                            if require_phone and enriched.data.get("phone"):
+                                lead_info["phone"] = enriched.data["phone"]
+                            
+                            # Add enriched data to full_context
+                            lead_info["full_context"]["personal_emails"] = enriched.data.get("personal_emails", [])
+                            lead_info["full_context"]["linkedin_url"] = enriched.data.get("linkedin_url")
+                            lead_info["full_context"]["enriched"] = True
+                            lead_info["full_context"]["enrichment_data"] = enriched.data
+                    except Exception as e:
+                        logger.warning(f"Failed to enrich lead {lead_info.get('email')}: {e}")
+                        # Continue without enrichment
+                
+                # Add source tracking
+                lead_info["full_context"]["source"] = "apollo_search"
+                lead_info["full_context"]["source_details"] = {
+                    "platform": "apollo",
+                    "search_page": page_number,
+                    "discovered_at": datetime.utcnow().isoformat(),
+                    "search_url": search_url
+                }
+                
                 # Create new lead
                 lead_info["campaign_id"] = campaign_id
                 lead_info["client_id"] = job_data.get("client_id")  # If provided
@@ -184,6 +228,17 @@ class AutopilotAgent:
         
         # Update campaign's page number for next run
         await self._update_campaign_page_number(campaign_id, "apollo", page_number + 1)
+        
+        # Update campaign's total leads discovered
+        if leads_created > 0:
+            try:
+                await supabase.rpc("increment_campaign_leads", {
+                    "campaign_uuid": campaign_id,
+                    "increment_by": leads_created
+                }).execute()
+                logger.info(f"Updated campaign total_leads_discovered by {leads_created}")
+            except Exception as e:
+                logger.error(f"Failed to update campaign lead count: {e}")
         
         logger.info(f"Lead discovery completed: {leads_created} new leads, {duplicate_leads} duplicates")
         
