@@ -112,33 +112,76 @@ IMPORTANT: The Supabase MCP is READ-ONLY for safety. All modifications must go t
 
 ## PostgreSQL Enum Migration Best Practices
 
-### Converting Text Columns to Enum
-When converting a text column to an enum type, always follow this pattern:
+### Converting Text Columns to Enum - The Bulletproof Way
+When converting a text column to an enum type, use this comprehensive idempotent pattern:
 
-1. **Drop the existing default**: `ALTER TABLE table_name ALTER COLUMN column_name DROP DEFAULT;`
-2. **Convert the column type**: `ALTER TABLE table_name ALTER COLUMN column_name TYPE enum_type USING column_name::enum_type;`
-3. **Set the new default**: `ALTER TABLE table_name ALTER COLUMN column_name SET DEFAULT 'value'::enum_type;`
-
-### Common Pitfalls
-- Never try to set a default value during the type conversion - PostgreSQL cannot cast defaults automatically
-- Always use explicit casting with `::enum_type` for defaults
-- Ensure all existing values match enum values before conversion
-- The error "default for column cannot be cast automatically to type" means you forgot to drop the default first
-
-### Template for Enum Migrations
+#### Complete Migration Template
 ```sql
--- Step 1: Create the enum type
-CREATE TYPE my_enum AS ENUM ('value1', 'value2', 'value3');
+-- 1. Create enum type (idempotent)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'my_enum') THEN
+        CREATE TYPE my_enum AS ENUM ('value1', 'value2', 'value3');
+    END IF;
+END$$;
 
--- Step 2: Drop existing default (CRITICAL - must be done before type conversion)
-ALTER TABLE my_table ALTER COLUMN my_column DROP DEFAULT;
+-- 2. Create implicit cast for safety (prevents "operator does not exist" errors)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_cast 
+        WHERE castsource = 'varchar'::regtype 
+        AND casttarget = 'my_enum'::regtype
+    ) THEN
+        CREATE CAST (varchar AS my_enum) WITH INOUT AS IMPLICIT;
+    END IF;
+END$$;
 
--- Step 3: Convert column type
-ALTER TABLE my_table ALTER COLUMN my_column TYPE my_enum USING my_column::my_enum;
-
--- Step 4: Set new default with explicit cast
-ALTER TABLE my_table ALTER COLUMN my_column SET DEFAULT 'value1'::my_enum;
+-- 3. Convert column only if it's still text type
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public'
+        AND table_name = 'my_table' 
+        AND column_name = 'my_column' 
+        AND data_type = 'text'
+    ) THEN
+        -- Drop dependent views
+        DROP VIEW IF EXISTS dependent_view_name;
+        
+        -- Drop existing default
+        EXECUTE 'ALTER TABLE my_table ALTER COLUMN my_column DROP DEFAULT';
+        
+        -- Update invalid values
+        UPDATE my_table 
+        SET my_column = 'value1' 
+        WHERE my_column NOT IN ('value1', 'value2', 'value3');
+        
+        -- Convert with double casting (CRITICAL: use ::text::enum_type)
+        EXECUTE 'ALTER TABLE my_table ALTER COLUMN my_column TYPE my_enum USING my_column::text::my_enum';
+        
+        -- Set new default
+        EXECUTE 'ALTER TABLE my_table ALTER COLUMN my_column SET DEFAULT ''value1''::my_enum';
+        
+        -- Recreate views
+        -- ... recreate any dropped views here
+    END IF;
+END$$;
 ```
+
+### Critical Points to Remember
+1. **Always use double casting**: `USING column::text::enum_type` (not just `column::enum_type`)
+2. **Create implicit casts**: Prevents "operator does not exist: enum_type = text" errors
+3. **Make everything idempotent**: Use DO blocks with existence checks
+4. **Handle view dependencies**: Drop before altering, recreate after
+5. **Use EXECUTE for dynamic SQL**: Inside DO blocks, use EXECUTE for DDL statements
+
+### Common Error Solutions
+- **"operator does not exist: enum_type = text"**: Create implicit cast or use double casting
+- **"default for column cannot be cast automatically"**: Drop default before conversion
+- **"cannot alter type of a column used by a view"**: Drop view before altering column
+- **"invalid input value for enum"**: Update invalid values before conversion
 
 ### Handling View Dependencies
 When altering a column that's used by a view, PostgreSQL will error with "cannot alter type of a column used by a view or rule". You must:

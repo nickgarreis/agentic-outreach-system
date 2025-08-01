@@ -12,89 +12,115 @@ BEGIN
         (SELECT string_agg(DISTINCT status, ', ') FROM public.messages WHERE status IS NOT NULL);
 END $$;
 
--- Define valid status values
--- These are all the statuses used throughout the codebase
-CREATE TYPE message_status AS ENUM (
-    'draft',          -- Message created but not scheduled
-    'scheduled',      -- Scheduled for future sending
-    'sent',          -- Successfully sent
-    'delivered',     -- Confirmed delivered by provider
-    'failed',        -- Send attempt failed
-    'retry_pending', -- Failed but will be retried
-    'bounced',       -- Email bounced
-    'unsubscribed'   -- Recipient unsubscribed
-);
+-- Create enum type if it doesn't exist (idempotent)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'message_status') THEN
+        CREATE TYPE message_status AS ENUM (
+            'draft',          -- Message created but not scheduled
+            'scheduled',      -- Scheduled for future sending
+            'sent',          -- Successfully sent
+            'delivered',     -- Confirmed delivered by provider
+            'failed',        -- Send attempt failed
+            'retry_pending', -- Failed but will be retried
+            'bounced',       -- Email bounced
+            'unsubscribed'   -- Recipient unsubscribed
+        );
+        
+        -- Add comment explaining the statuses
+        COMMENT ON TYPE message_status IS 'Valid status values for messages with their lifecycle meanings';
+    END IF;
+END$$;
 
--- Add comment explaining the statuses
-COMMENT ON TYPE message_status IS 'Valid status values for messages with their lifecycle meanings';
+-- Create implicit cast from varchar to message_status for safer operations
+-- This helps with compatibility when converting from text columns
+DO $$
+BEGIN
+    -- Check if cast already exists
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_cast 
+        WHERE castsource = 'varchar'::regtype 
+        AND casttarget = 'message_status'::regtype
+    ) THEN
+        CREATE CAST (varchar AS message_status) WITH INOUT AS IMPLICIT;
+    END IF;
+END$$;
 
--- Update the messages table to use the enum type
--- First, we need to handle any existing invalid values
-UPDATE public.messages 
-SET status = 'failed' 
-WHERE status IS NOT NULL 
-  AND status NOT IN ('draft', 'scheduled', 'sent', 'delivered', 'failed', 'retry_pending', 'bounced', 'unsubscribed');
+-- Only proceed with column type change if status is still text type
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public'
+        AND table_name = 'messages' 
+        AND column_name = 'status' 
+        AND data_type = 'text'
+    ) THEN
+        -- Drop dependent views first
+        DROP VIEW IF EXISTS message_tracking_status;
+        
+        -- Drop existing default
+        EXECUTE 'ALTER TABLE public.messages ALTER COLUMN status DROP DEFAULT';
+        
+        -- Update any invalid values before conversion
+        UPDATE public.messages 
+        SET status = 'failed' 
+        WHERE status IS NOT NULL 
+          AND status NOT IN ('draft', 'scheduled', 'sent', 'delivered', 'failed', 'retry_pending', 'bounced', 'unsubscribed');
+        
+        -- Alter column with proper double casting (text -> text -> enum)
+        EXECUTE 'ALTER TABLE public.messages ALTER COLUMN status TYPE message_status USING status::text::message_status';
+        
+        -- Set new default
+        EXECUTE 'ALTER TABLE public.messages ALTER COLUMN status SET DEFAULT ''draft''::message_status';
+        
+        -- Update column comment
+        COMMENT ON COLUMN public.messages.status IS 'Current status of the message in its lifecycle';
+        
+        -- Recreate the message_tracking_status view
+        CREATE OR REPLACE VIEW message_tracking_status AS
+        SELECT 
+          m.id,
+          m.campaign_id,
+          m.lead_id,
+          m.channel,
+          m.status,
+          m.send_at,
+          m.sent_at,
+          m.delivered_at,
+          m.opened_at,
+          m.clicked_at,
+          m.bounced_at,
+          m.unsubscribed_at,
+          CASE 
+            WHEN m.bounced_at IS NOT NULL THEN 'bounced'
+            WHEN m.unsubscribed_at IS NOT NULL THEN 'unsubscribed'
+            WHEN m.clicked_at IS NOT NULL THEN 'clicked'
+            WHEN m.opened_at IS NOT NULL THEN 'opened'
+            WHEN m.delivered_at IS NOT NULL THEN 'delivered'
+            WHEN m.sent_at IS NOT NULL THEN 'sent'
+            ELSE m.status::text
+          END as tracking_status,
+          jsonb_array_length(m.tracking_events) as event_count,
+          m.tracking_events
+        FROM public.messages m
+        WHERE m.channel = 'email';
+        
+        -- Grant permissions
+        GRANT SELECT ON message_tracking_status TO authenticated;
+        
+        RAISE NOTICE 'Successfully converted status column to enum type';
+    ELSE
+        RAISE NOTICE 'Status column is already using enum type or does not exist, skipping conversion';
+    END IF;
+END$$;
 
--- Drop the view that depends on the status column
--- This is necessary because PostgreSQL doesn't allow altering columns used by views
-DROP VIEW IF EXISTS message_tracking_status;
-
--- Drop the existing default first (required for type conversion)
-ALTER TABLE public.messages 
-ALTER COLUMN status DROP DEFAULT;
-
--- Now alter the column to use the enum
--- This requires casting the existing text values
-ALTER TABLE public.messages 
-ALTER COLUMN status TYPE message_status 
-USING status::message_status;
-
--- Add a default value for new messages
-ALTER TABLE public.messages 
-ALTER COLUMN status SET DEFAULT 'draft'::message_status;
-
--- Recreate the message_tracking_status view
--- This view was originally created in 20250801000013_add_inline_tracking_data.sql
-CREATE OR REPLACE VIEW message_tracking_status AS
-SELECT 
-  m.id,
-  m.campaign_id,
-  m.lead_id,
-  m.channel,
-  m.status,
-  m.send_at,
-  m.sent_at,
-  m.delivered_at,
-  m.opened_at,
-  m.clicked_at,
-  m.bounced_at,
-  m.unsubscribed_at,
-  CASE 
-    WHEN m.bounced_at IS NOT NULL THEN 'bounced'
-    WHEN m.unsubscribed_at IS NOT NULL THEN 'unsubscribed'
-    WHEN m.clicked_at IS NOT NULL THEN 'clicked'
-    WHEN m.opened_at IS NOT NULL THEN 'opened'
-    WHEN m.delivered_at IS NOT NULL THEN 'delivered'
-    WHEN m.sent_at IS NOT NULL THEN 'sent'
-    ELSE m.status
-  END as tracking_status,
-  jsonb_array_length(m.tracking_events) as event_count,
-  m.tracking_events
-FROM public.messages m
-WHERE m.channel = 'email';
-
--- Re-grant access to the view
-GRANT SELECT ON message_tracking_status TO authenticated;
-
--- Update column comment
-COMMENT ON COLUMN public.messages.status IS 'Current status of the message in its lifecycle';
-
--- Create an index on status for performance
+-- Create an index on status for performance (idempotent)
 CREATE INDEX IF NOT EXISTS idx_messages_status 
 ON public.messages(status) 
 WHERE status IS NOT NULL;
 
--- Create a function to validate status transitions
+-- Create a function to validate status transitions (idempotent)
 -- This ensures status changes follow logical progression
 CREATE OR REPLACE FUNCTION validate_message_status_transition()
 RETURNS TRIGGER AS $$
@@ -108,7 +134,7 @@ BEGIN
     -- draft -> scheduled, sent (direct send)
     -- scheduled -> sent, failed, retry_pending
     -- sent -> delivered, bounced, failed
-    -- delivered -> bounced (late bounce)
+    -- delivered -> bounced (late bounce), unsubscribed
     -- failed -> retry_pending, failed (permanent)
     -- retry_pending -> sent, failed
     -- bounced -> (terminal state)
@@ -149,17 +175,18 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Add trigger for status transition validation
+-- Add trigger for status transition validation (idempotent)
+DROP TRIGGER IF EXISTS validate_message_status_transition_trigger ON public.messages;
 CREATE TRIGGER validate_message_status_transition_trigger
 BEFORE UPDATE OF status ON public.messages
 FOR EACH ROW
 WHEN (OLD.status IS DISTINCT FROM NEW.status)
 EXECUTE FUNCTION validate_message_status_transition();
 
--- Add helpful comment
+-- Add helpful comments
 COMMENT ON FUNCTION validate_message_status_transition IS 'Ensures message status transitions follow valid lifecycle paths';
 
--- Create a view for message status statistics
+-- Create a view for message status statistics (idempotent)
 CREATE OR REPLACE VIEW message_status_stats AS
 SELECT 
     campaign_id,
@@ -177,3 +204,9 @@ GRANT SELECT ON message_status_stats TO authenticated;
 
 -- Add helpful comment
 COMMENT ON VIEW message_status_stats IS 'Aggregated statistics of message statuses by campaign';
+
+-- Final success message
+DO $$
+BEGIN
+    RAISE NOTICE 'Message status validation migration completed successfully';
+END$$;
