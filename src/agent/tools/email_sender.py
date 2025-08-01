@@ -359,8 +359,9 @@ class EmailSender(BaseTools):
                 )
                 
                 # Add substitutions for personalization
-                for key, value in self._get_personalization_substitutions(lead_data).items():
-                    personalization.add_substitution(key, value)
+                # In newer SendGrid SDK, substitutions are added as a dict
+                substitutions = self._get_personalization_substitutions(lead_data)
+                personalization.dynamic_template_data = substitutions
                 
                 # Add tracking
                 personalization.add_custom_arg('message_id', str(msg['id']))
