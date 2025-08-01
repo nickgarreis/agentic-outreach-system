@@ -21,11 +21,20 @@ The Apollo Search and Enrich system is an automated lead discovery and enrichmen
 - **`require_phone_number`** (BOOLEAN): Controls whether to reveal phone numbers during enrichment
 - **`total_leads_discovered`** (INTEGER): Counter tracking all leads found for the campaign
 
-#### Database Trigger
+#### Database Triggers
+
+**Campaign Activation Trigger**
 When a campaign's status changes to "active", a PostgreSQL trigger automatically:
 1. Detects the status change
 2. Extracts all platform URLs from `search_url`
 3. Creates a job in the `jobs` table with type `campaign_active`
+
+**Low Enriched Leads Trigger**
+When an active campaign's enriched lead count falls below 5, a PostgreSQL trigger automatically:
+1. Monitors INSERT/UPDATE/DELETE operations on the leads table
+2. Counts leads with status = "enriched" for the affected campaign
+3. Creates a job identical to campaign activation if count < 5
+4. Includes 5-minute cooldown to prevent duplicate jobs
 
 ### 2. Job System Flow
 
@@ -70,6 +79,8 @@ The job transitions through several statuses:
   "completed_at": "2025-01-30T12:00:00Z"
 }
 ```
+
+**Note**: Jobs created by the low enriched leads trigger will include `"triggered_by": "low_enriched_leads"` in the job data for tracking purposes.
 
 #### Failure Result Structure
 ```json
@@ -181,6 +192,13 @@ Each discovered lead includes:
 - Phone number enrichment only when required
 - Reduces unnecessary credit consumption
 - Personal emails always included (lower credit cost)
+
+### Automatic Lead Replenishment
+- Monitors active campaigns for low enriched lead counts
+- Automatically triggers new lead discovery when count < 5
+- Prevents campaign starvation during outreach
+- 5-minute cooldown prevents job spam
+- Uses same discovery logic as initial activation
 
 ### Error Handling
 - Specific error messages for different failure types:
