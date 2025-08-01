@@ -8,8 +8,10 @@ from .database_tools import DatabaseTools
 from .apollo_search_tool import ApolloSearchTool
 from .apollo_enrich_tool import ApolloEnrichTool
 from .tavily_tool import TavilyTool
+from .outreach_generator import OutreachGenerator
+from .message_scheduler import MessageScheduler
 
-__all__ = ["BaseTools", "BaseTool", "ToolResult", "DatabaseTools", "ApolloSearchTool", "ApolloEnrichTool", "TavilyTool"]
+__all__ = ["BaseTools", "BaseTool", "ToolResult", "DatabaseTools", "ApolloSearchTool", "ApolloEnrichTool", "TavilyTool", "OutreachGenerator", "MessageScheduler"]
 
 # For backwards compatibility and convenience
 # This allows: from agent.tools import DatabaseTools
