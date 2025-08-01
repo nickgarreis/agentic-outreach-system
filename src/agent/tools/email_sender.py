@@ -359,10 +359,8 @@ class EmailSender(BaseTools):
                     group_data['subject_template'], lead_data
                 )
                 
-                # Add substitutions for personalization
-                # In newer SendGrid SDK, substitutions are added as a dict
-                substitutions = self._get_personalization_substitutions(lead_data)
-                personalization.dynamic_template_data = substitutions
+                # Note: We're not using dynamic templates, so we don't need dynamic_template_data
+                # The content is already personalized in the message content
                 
                 # Add tracking - in newer SDK, custom args are set as a dict
                 personalization.custom_args = {
