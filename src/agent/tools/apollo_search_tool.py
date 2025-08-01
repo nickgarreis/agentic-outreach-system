@@ -41,12 +41,12 @@ class ApolloSearchTool(BaseTool):
             )
         
         # Extract query parameters from the search URL
-        # Apollo search URLs look like: https://app.apollo.io/#/people/search?personTitles[]=CEO&personLocations[]=San%20Francisco%2C%20CA
+        # Apollo search URLs look like: https://app.apollo.io/#/people?personTitles[]=CEO&personLocations[]=San%20Francisco%2C%20CA
         # We need to convert this to API parameters
         try:
             # Parse the URL to extract parameters
-            if "#/people/search?" in search_url:
-                query_string = search_url.split("#/people/search?")[1]
+            if "#/people?" in search_url:
+                query_string = search_url.split("#/people?")[1]
             else:
                 return ToolResult(
                     success=False,

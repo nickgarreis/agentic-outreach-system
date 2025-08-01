@@ -19,6 +19,31 @@ from ..database import get_supabase
 logger = logging.getLogger(__name__)
 
 
+def is_placeholder_email(email: str) -> bool:
+    """
+    Check if an email is a placeholder.
+    
+    Args:
+        email: Email address to check
+        
+    Returns:
+        bool: True if email is a placeholder
+    """
+    if not email:
+        return True
+        
+    email_lower = email.lower()
+    placeholders = [
+        'placeholder.com',
+        'email_not_unlocked@domain.com',
+        'example.com',
+        'noemail@',
+        'unknown@'
+    ]
+    
+    return any(placeholder in email_lower for placeholder in placeholders)
+
+
 @agentops.agent
 class AutopilotAgent:
     """
@@ -89,6 +114,8 @@ class AutopilotAgent:
                 result = await self._handle_lead_outreach(job_data)
             elif self.job_type == "send_email":
                 result = await self._handle_send_email(job_data)
+            elif self.job_type == "lead_enrichment":
+                result = await self._handle_lead_enrichment(job_data)
             else:
                 # Unknown job type
                 result = {
@@ -161,59 +188,14 @@ class AutopilotAgent:
         
         logger.info(f"Apollo search returned {len(leads_data)} leads")
         
-        # Get campaign settings for phone number requirement
-        campaign_response = await get_supabase()
-        campaign_data = await campaign_response.table("campaigns").select("require_phone_number").eq(
-            "id", campaign_id
-        ).single().execute()
-        require_phone = campaign_data.data.get("require_phone_number", False) if campaign_data.data else False
-        
-        logger.info(f"Phone number requirement: {require_phone}")
-        
         # Save leads to database
         leads_created = 0
-        duplicate_leads = 0
         supabase = await get_supabase()
         
         for lead_data in leads_data:
             try:
                 # Extract lead information
                 lead_info = self.apollo_search._extract_lead_data(lead_data)
-                
-                # Check if lead already exists (by email)
-                if lead_info.get("email"):
-                    existing = await supabase.table("leads").select("id").eq(
-                        "email", lead_info["email"]
-                    ).eq("campaign_id", campaign_id).execute()
-                    
-                    if existing.data:
-                        duplicate_leads += 1
-                        continue
-                
-                # Enrich lead data if we have basic info
-                if lead_info.get("first_name") or lead_info.get("email"):
-                    try:
-                        enriched = await self.apollo_enrich.execute(
-                            first_name=lead_info.get("first_name"),
-                            last_name=lead_info.get("last_name"),
-                            email=lead_info.get("email"),
-                            organization_name=lead_info.get("company"),
-                            reveal_phone_number=require_phone
-                        )
-                        
-                        if enriched.success and enriched.data:
-                            # Merge enriched data
-                            if require_phone and enriched.data.get("phone"):
-                                lead_info["phone"] = enriched.data["phone"]
-                            
-                            # Add enriched data to full_context
-                            lead_info["full_context"]["personal_emails"] = enriched.data.get("personal_emails", [])
-                            lead_info["full_context"]["linkedin_url"] = enriched.data.get("linkedin_url")
-                            lead_info["full_context"]["enriched"] = True
-                            lead_info["full_context"]["enrichment_data"] = enriched.data
-                    except Exception as e:
-                        logger.warning(f"Failed to enrich lead {lead_info.get('email')}: {e}")
-                        # Continue without enrichment
                 
                 # Add source tracking
                 lead_info["full_context"]["source"] = "apollo_search"
@@ -224,14 +206,15 @@ class AutopilotAgent:
                     "search_url": search_url
                 }
                 
-                # Create new lead
+                # Create new lead with discovered status
                 lead_info["campaign_id"] = campaign_id
                 lead_info["client_id"] = job_data.get("client_id")  # If provided
-                # Set status based on enrichment success
-                lead_info["status"] = "enriched" if lead_info["full_context"].get("enriched", False) else "enrichment_failed"
+                lead_info["status"] = "discovered"
                 
                 await supabase.table("leads").insert(lead_info).execute()
                 leads_created += 1
+                
+                logger.info(f"Discovered lead: {lead_info.get('first_name')} {lead_info.get('last_name')} - Enrichment job will be created automatically")
                 
             except Exception as e:
                 logger.error(f"Failed to save lead: {e}")
@@ -251,12 +234,11 @@ class AutopilotAgent:
             except Exception as e:
                 logger.error(f"Failed to update campaign lead count: {e}")
         
-        logger.info(f"Lead discovery completed: {leads_created} new leads, {duplicate_leads} duplicates")
+        logger.info(f"Lead discovery completed: {leads_created} new leads created")
         
         return {
             "leads_found": len(leads_data),
             "leads_created": leads_created,
-            "duplicate_leads": duplicate_leads,
             "next_page": page_number + 1,
             "platform": "apollo"
         }
@@ -676,4 +658,134 @@ class AutopilotAgent:
             "results": results,
             "retry_results": retry_results,
             "status": "completed"
+        }
+    
+    @track_operation("handle_lead_enrichment")
+    async def _handle_lead_enrichment(self, job_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle lead_enrichment job type - enrich a single lead with Apollo.
+        
+        Args:
+            job_data: Contains lead_id to enrich
+            
+        Returns:
+            dict: Job execution results including enrichment status
+        """
+        lead_id = job_data.get("lead_id")
+        
+        if not lead_id:
+            raise Exception("lead_id is required for lead_enrichment job")
+        
+        logger.info(f"Starting enrichment for lead: {lead_id}")
+        
+        # Get lead data from database
+        supabase = await get_supabase()
+        lead_response = await supabase.table("leads").select("*").eq(
+            "id", lead_id
+        ).single().execute()
+        
+        if not lead_response.data:
+            raise Exception(f"Lead {lead_id} not found")
+        
+        lead_data = lead_response.data
+        campaign_id = lead_data.get("campaign_id")
+        
+        # Get campaign data for phone requirement
+        campaign_response = await supabase.table("campaigns").select(
+            "require_phone_number"
+        ).eq("id", campaign_id).single().execute()
+        
+        require_phone = False
+        if campaign_response.data:
+            require_phone = campaign_response.data.get("require_phone_number", False)
+        
+        logger.info(
+            f"Enriching lead: {lead_data.get('first_name')} {lead_data.get('last_name')} "
+            f"at {lead_data.get('company')} - Phone required: {require_phone}"
+        )
+        
+        # Attempt enrichment
+        try:
+            enriched = await self.apollo_enrich.execute(
+                first_name=lead_data.get("first_name"),
+                last_name=lead_data.get("last_name"),
+                email=None,  # Don't pass placeholder email
+                organization_name=lead_data.get("company"),
+                reveal_phone_number=require_phone
+            )
+            
+            # Prepare update data based on enrichment results
+            update_data = {}
+            
+            if enriched.success and enriched.data:
+                enriched_email = enriched.data.get("email")
+                
+                # Check if we got a real email
+                if enriched_email and not is_placeholder_email(enriched_email):
+                    # Successfully enriched with real email
+                    update_data["email"] = enriched_email
+                    update_data["status"] = "enriched"
+                    
+                    # Update phone if requested and available
+                    if require_phone and enriched.data.get("phone"):
+                        update_data["phone"] = enriched.data["phone"]
+                    
+                    # Update full context with enrichment data
+                    full_context = lead_data.get("full_context", {})
+                    full_context["enriched"] = True
+                    full_context["enrichment_data"] = enriched.data
+                    full_context["personal_emails"] = enriched.data.get("personal_emails", [])
+                    full_context["linkedin_url"] = enriched.data.get("linkedin_url")
+                    full_context["enriched_at"] = datetime.utcnow().isoformat()
+                    update_data["full_context"] = full_context
+                    
+                    logger.info(f"Successfully enriched lead {lead_id} with email: {enriched_email}")
+                else:
+                    # Enrichment succeeded but no real email found
+                    update_data["status"] = "enrichment_failed"
+                    
+                    full_context = lead_data.get("full_context", {})
+                    full_context["enriched"] = False
+                    full_context["enrichment_data"] = enriched.data
+                    full_context["enrichment_error"] = "No real email found - still placeholder"
+                    full_context["enrichment_attempted_at"] = datetime.utcnow().isoformat()
+                    update_data["full_context"] = full_context
+                    
+                    logger.warning(f"Enrichment for lead {lead_id} returned placeholder email: {enriched_email}")
+            else:
+                # Enrichment API call failed
+                update_data["status"] = "enrichment_failed"
+                
+                full_context = lead_data.get("full_context", {})
+                full_context["enriched"] = False
+                full_context["enrichment_error"] = enriched.error if enriched else "Unknown error"
+                full_context["enrichment_attempted_at"] = datetime.utcnow().isoformat()
+                update_data["full_context"] = full_context
+                
+                logger.error(f"Enrichment failed for lead {lead_id}: {enriched.error if enriched else 'Unknown error'}")
+            
+        except Exception as e:
+            # Handle unexpected errors
+            logger.error(f"Unexpected error during enrichment for lead {lead_id}: {e}")
+            
+            update_data = {
+                "status": "enrichment_failed",
+                "full_context": {
+                    **lead_data.get("full_context", {}),
+                    "enriched": False,
+                    "enrichment_error": str(e),
+                    "enrichment_attempted_at": datetime.utcnow().isoformat()
+                }
+            }
+        
+        # Update the lead in database
+        await supabase.table("leads").update(update_data).eq("id", lead_id).execute()
+        
+        return {
+            "lead_id": lead_id,
+            "lead_name": f"{lead_data.get('first_name')} {lead_data.get('last_name')}",
+            "company": lead_data.get("company"),
+            "status": update_data["status"],
+            "enriched": update_data.get("full_context", {}).get("enriched", False),
+            "error": update_data.get("full_context", {}).get("enrichment_error")
         }
