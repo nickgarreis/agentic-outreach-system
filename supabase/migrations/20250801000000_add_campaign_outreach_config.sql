@@ -1,4 +1,4 @@
--- /supabase/migrations/20250801_add_campaign_outreach_config.sql
+-- /supabase/migrations/20250801000000_add_campaign_outreach_config.sql
 -- Add outreach configuration columns to campaigns table
 -- This migration adds boolean flags for outreach channels, email footer config, and daily sending limits
 -- RELEVANT FILES: supabase/migrations/20250728063428_simplify_campaigns_table.sql, src/database/models.py, src/api/campaigns.py
