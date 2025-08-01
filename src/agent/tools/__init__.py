@@ -7,8 +7,9 @@ from .base_tools import BaseTools, BaseTool, ToolResult
 from .database_tools import DatabaseTools
 from .apollo_search_tool import ApolloSearchTool
 from .apollo_enrich_tool import ApolloEnrichTool
+from .tavily_tool import TavilyTool
 
-__all__ = ["BaseTools", "BaseTool", "ToolResult", "DatabaseTools", "ApolloSearchTool", "ApolloEnrichTool"]
+__all__ = ["BaseTools", "BaseTool", "ToolResult", "DatabaseTools", "ApolloSearchTool", "ApolloEnrichTool", "TavilyTool"]
 
 # For backwards compatibility and convenience
 # This allows: from agent.tools import DatabaseTools
