@@ -4,7 +4,7 @@
 # RELEVANT FILES: base_tools.py, ../autopilot_agent.py, ../../database.py
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
 from ..agentops_config import track_tool
@@ -493,3 +493,239 @@ class DatabaseTools(BaseTools):
                 results["errors"].append({"data": message_data, "error": str(e)})
 
         return results
+
+    # New Scheduling Methods for Outreach
+
+    @track_tool("get_campaign_scheduled_messages_count")
+    async def get_campaign_scheduled_messages_count(
+        self, campaign_id: str, date: Optional[str] = None, channel: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Count scheduled messages for a campaign by date and channel.
+
+        Args:
+            campaign_id: Campaign UUID
+            date: Optional date filter (ISO format)
+            channel: Optional channel filter (email/linkedin)
+
+        Returns:
+            dict: Message counts by channel and date
+        """
+        try:
+            client = await self._get_client()
+            query = (
+                client.table("messages")
+                .select("channel, send_at", count="exact")
+                .eq("campaign_id", campaign_id)
+                .eq("status", "scheduled")
+            )
+
+            # Add date filter if provided
+            if date:
+                # Get start and end of day in UTC
+                start_of_day = f"{date}T00:00:00Z"
+                end_of_day = f"{date}T23:59:59Z"
+                query = query.gte("send_at", start_of_day).lte("send_at", end_of_day)
+
+            # Add channel filter if provided
+            if channel:
+                query = query.eq("channel", channel)
+
+            response = await query.execute()
+
+            # Process results
+            counts = {"email": 0, "linkedin": 0, "total": 0}
+            for message in response.data:
+                message_channel = message.get("channel")
+                if message_channel in counts:
+                    counts[message_channel] += 1
+                counts["total"] += 1
+
+            return counts
+        except Exception as e:
+            logger.error(f"Failed to get scheduled message counts: {e}")
+            return {"email": 0, "linkedin": 0, "total": 0}
+
+    @track_tool("get_next_available_slot")
+    async def get_next_available_slot(
+        self,
+        campaign_id: str,
+        channel: str,
+        daily_limit: int,
+        min_gap_minutes: int = 5,
+        business_hours: Tuple[int, int] = (9, 17),
+    ) -> Optional[str]:
+        """
+        Find the next available time slot for a message.
+
+        Args:
+            campaign_id: Campaign UUID
+            channel: Channel type (email/linkedin)
+            daily_limit: Daily sending limit
+            min_gap_minutes: Minimum gap between messages
+            business_hours: Tuple of (start_hour, end_hour)
+
+        Returns:
+            str: ISO formatted datetime for next available slot or None
+        """
+        try:
+            from datetime import datetime, timedelta
+            import pytz
+
+            tz = pytz.timezone("America/New_York")  # Default timezone
+            now = datetime.now(tz)
+
+            # Check next 14 days
+            for days_ahead in range(14):
+                check_date = (now + timedelta(days=days_ahead)).date()
+
+                # Get scheduled messages for this date
+                counts = await self.get_campaign_scheduled_messages_count(
+                    campaign_id, check_date.isoformat(), channel
+                )
+
+                if counts[channel] < daily_limit:
+                    # Get all scheduled times for this date/channel
+                    client = await self._get_client()
+                    response = (
+                        await client.table("messages")
+                        .select("send_at")
+                        .eq("campaign_id", campaign_id)
+                        .eq("channel", channel)
+                        .eq("status", "scheduled")
+                        .gte("send_at", f"{check_date}T00:00:00Z")
+                        .lte("send_at", f"{check_date}T23:59:59Z")
+                        .order("send_at")
+                        .execute()
+                    )
+
+                    scheduled_times = [
+                        datetime.fromisoformat(m["send_at"].replace("Z", "+00:00"))
+                        for m in response.data
+                    ]
+
+                    # Find available slot
+                    start_hour, end_hour = business_hours
+                    slot_start = tz.localize(
+                        datetime.combine(check_date, datetime.min.time()).replace(
+                            hour=start_hour
+                        )
+                    )
+                    slot_end = tz.localize(
+                        datetime.combine(check_date, datetime.min.time()).replace(
+                            hour=end_hour
+                        )
+                    )
+
+                    # If today, start from current time
+                    if days_ahead == 0 and now > slot_start:
+                        slot_start = now + timedelta(minutes=1)
+
+                    # Find gap
+                    if not scheduled_times:
+                        if slot_start < slot_end:
+                            return slot_start.astimezone(pytz.UTC).isoformat()
+                    else:
+                        # Check after last scheduled message
+                        last_time = max(scheduled_times)
+                        next_slot = last_time + timedelta(minutes=min_gap_minutes)
+                        if next_slot < slot_end:
+                            return next_slot.astimezone(pytz.UTC).isoformat()
+
+            return None
+        except Exception as e:
+            logger.error(f"Failed to find next available slot: {e}")
+            return None
+
+    @track_tool("bulk_schedule_messages")
+    async def bulk_schedule_messages(
+        self, messages: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Efficiently create multiple scheduled messages.
+
+        Args:
+            messages: List of message data with send_at times
+
+        Returns:
+            dict: Results with created messages and any errors
+        """
+        try:
+            client = await self._get_client()
+
+            # Prepare all messages with timestamps
+            for msg in messages:
+                msg["created_at"] = datetime.utcnow().isoformat()
+                msg["updated_at"] = datetime.utcnow().isoformat()
+                # Ensure metadata is JSONB compatible
+                if "metadata" in msg and isinstance(msg["metadata"], dict):
+                    msg["metadata"] = msg["metadata"]
+
+            # Bulk insert
+            response = await client.table("messages").insert(messages).execute()
+
+            return {
+                "success": True,
+                "created": len(response.data),
+                "message_ids": [m["id"] for m in response.data],
+            }
+        except Exception as e:
+            logger.error(f"Failed to bulk schedule messages: {e}")
+            return {"success": False, "error": str(e), "created": 0}
+
+    @track_tool("get_campaign_sending_metrics")
+    async def get_campaign_sending_metrics(
+        self, campaign_id: str, days: int = 7
+    ) -> Dict[str, Any]:
+        """
+        Get sending metrics for a campaign over the specified days.
+
+        Args:
+            campaign_id: Campaign UUID
+            days: Number of days to analyze
+
+        Returns:
+            dict: Metrics including scheduled, sent, and available slots
+        """
+        try:
+            from datetime import datetime, timedelta
+
+            metrics = {"by_date": {}, "totals": {"scheduled": 0, "sent": 0}}
+
+            # Get campaign limits
+            campaign = await self.get_campaign(campaign_id)
+            if not campaign:
+                return metrics
+
+            daily_limits = {
+                "email": campaign.get("daily_sending_limit_email", 0),
+                "linkedin": campaign.get("daily_sending_limit_linkedin", 0),
+            }
+
+            # Analyze each day
+            for i in range(days):
+                date = (datetime.utcnow() + timedelta(days=i)).date()
+                date_str = date.isoformat()
+
+                # Get counts for this date
+                scheduled = await self.get_campaign_scheduled_messages_count(
+                    campaign_id, date_str
+                )
+
+                metrics["by_date"][date_str] = {
+                    "scheduled": scheduled,
+                    "limits": daily_limits,
+                    "available": {
+                        "email": max(0, daily_limits["email"] - scheduled["email"]),
+                        "linkedin": max(
+                            0, daily_limits["linkedin"] - scheduled["linkedin"]
+                        ),
+                    },
+                }
+
+                metrics["totals"]["scheduled"] += scheduled["total"]
+
+            return metrics
+        except Exception as e:
+            logger.error(f"Failed to get campaign sending metrics: {e}")
+            return {"by_date": {}, "totals": {"scheduled": 0, "sent": 0}}

@@ -13,7 +13,7 @@ from ..config import get_settings
 from .agentops_config import (
     track_operation,
 )
-from .tools import DatabaseTools, ApolloSearchTool, ApolloEnrichTool, TavilyTool
+from .tools import DatabaseTools, ApolloSearchTool, ApolloEnrichTool, TavilyTool, OutreachGenerator, MessageScheduler
 from ..database import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,8 @@ class AutopilotAgent:
         self.apollo_search = ApolloSearchTool()
         self.apollo_enrich = ApolloEnrichTool()
         self.tavily_tool = TavilyTool()
+        self.outreach_generator = OutreachGenerator()
+        self.message_scheduler = MessageScheduler()
 
         # For backwards compatibility
         self.tools = self.db_tools
@@ -82,6 +84,8 @@ class AutopilotAgent:
                 result = await self._handle_campaign_active(job_data)
             elif self.job_type == "lead_research":
                 result = await self._handle_lead_research(job_data)
+            elif self.job_type == "lead_outreach":
+                result = await self._handle_lead_outreach(job_data)
             else:
                 # Unknown job type
                 result = {
@@ -338,7 +342,7 @@ class AutopilotAgent:
         # Check if we have LinkedIn URL and extract additional content
         linkedin_url = lead_data.get("full_context", {}).get("linkedin_url")
         if linkedin_url:
-            self.logger.info(f"Extracting LinkedIn profile content for {linkedin_url}")
+            logger.info(f"Extracting LinkedIn profile content for {linkedin_url}")
             
             try:
                 extract_result = await self.tavily_tool.extract_from_urls(
@@ -356,9 +360,9 @@ class AutopilotAgent:
                         extract_result.data
                     )
                     
-                    self.logger.info("Successfully extracted and parsed LinkedIn profile content")
+                    logger.info("Successfully extracted and parsed LinkedIn profile content")
             except Exception as e:
-                self.logger.warning(f"Failed to extract LinkedIn content: {e}")
+                logger.warning(f"Failed to extract LinkedIn content: {e}")
         
         # Update lead with research data
         existing_context = lead_data.get("full_context", {})
@@ -390,4 +394,104 @@ class AutopilotAgent:
             "research_summary": research_result.data.get("summary", {}),
             "status": "researched",
             "credit_usage": credit_report
+        }
+    
+    @track_operation("handle_lead_outreach")
+    async def _handle_lead_outreach(self, job_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle lead_outreach job type - generate and schedule personalized outreach messages.
+        
+        Args:
+            job_data: Contains lead_id, campaign_id, and channel settings
+            
+        Returns:
+            dict: Job execution results including scheduled messages
+        """
+        lead_id = job_data.get("lead_id")
+        campaign_id = job_data.get("campaign_id")
+        enabled_channels = job_data.get("enabled_channels", {})
+        daily_limits = job_data.get("daily_limits", {})
+        
+        if not lead_id or not campaign_id:
+            raise Exception("lead_id and campaign_id are required for lead_outreach job")
+        
+        logger.info(f"Starting outreach generation for lead: {lead_id}")
+        
+        # Get lead data from database
+        supabase = await get_supabase()
+        lead_response = await supabase.table("leads").select("*").eq(
+            "id", lead_id
+        ).single().execute()
+        
+        if not lead_response.data:
+            raise Exception(f"Lead {lead_id} not found")
+        
+        lead_data = lead_response.data
+        
+        # Get campaign data for context
+        campaign_response = await supabase.table("campaigns").select("*").eq(
+            "id", campaign_id
+        ).single().execute()
+        
+        if not campaign_response.data:
+            raise Exception(f"Campaign {campaign_id} not found")
+        
+        campaign_data = campaign_response.data
+        
+        logger.info(
+            f"Generating outreach for {lead_data.get('first_name')} {lead_data.get('last_name')} "
+            f"at {lead_data.get('company')} - Channels: {list(enabled_channels.keys())}"
+        )
+        
+        # Generate personalized outreach sequences
+        generation_result = await self.outreach_generator.generate_outreach_sequence(
+            lead_data=lead_data,
+            campaign_data=campaign_data,
+            enabled_channels=enabled_channels
+        )
+        
+        if not generation_result.success:
+            raise Exception(f"Failed to generate outreach: {generation_result.error}")
+        
+        sequences = generation_result.data.get("sequences", {})
+        
+        logger.info(f"Generated {generation_result.data.get('total_messages')} messages")
+        
+        # Schedule messages respecting constraints
+        scheduling_result = await self.message_scheduler.schedule_outreach_messages(
+            sequences=sequences,
+            campaign_id=campaign_id,
+            lead_id=lead_id,
+            daily_limits=daily_limits
+        )
+        
+        if not scheduling_result.success:
+            raise Exception(f"Failed to schedule messages: {scheduling_result.error}")
+        
+        scheduled_messages = scheduling_result.data.get("scheduled_messages", [])
+        
+        # Bulk create messages in database
+        if scheduled_messages:
+            create_result = await self.db_tools.bulk_schedule_messages(scheduled_messages)
+            
+            if not create_result.get("success"):
+                raise Exception(f"Failed to create messages: {create_result.get('error')}")
+            
+            logger.info(
+                f"Successfully created {create_result.get('created')} messages "
+                f"for lead {lead_id}"
+            )
+        
+        # Get campaign metrics for reporting
+        metrics = await self.db_tools.get_campaign_sending_metrics(campaign_id, days=7)
+        
+        return {
+            "lead_id": lead_id,
+            "lead_name": f"{lead_data.get('first_name')} {lead_data.get('last_name')}",
+            "company": lead_data.get("company"),
+            "messages_generated": generation_result.data.get("total_messages"),
+            "messages_scheduled": len(scheduled_messages),
+            "scheduling_log": scheduling_result.data.get("scheduling_log", []),
+            "campaign_metrics": metrics,
+            "status": "outreach_scheduled"
         }
