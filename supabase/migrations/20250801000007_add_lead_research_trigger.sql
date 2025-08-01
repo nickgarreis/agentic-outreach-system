@@ -95,12 +95,6 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION handle_lead_research_trigger()
 RETURNS TRIGGER AS $$
 DECLARE
-  campaign_cursor CURSOR FOR 
-    SELECT DISTINCT c.id, c.name
-    FROM campaigns c
-    WHERE c.status = 'active'
-      AND (c.daily_sending_limit_email > 0 OR c.daily_sending_limit_linkedin > 0);
-  
   campaign_rec RECORD;
   research_check RECORD;
   leads_to_research RECORD;
@@ -108,7 +102,12 @@ DECLARE
   max_jobs_per_trigger INT := 10;  -- Limit jobs per trigger execution
 BEGIN
   -- Loop through all active campaigns with daily limits
-  FOR campaign_rec IN campaign_cursor LOOP
+  FOR campaign_rec IN 
+    SELECT DISTINCT c.id, c.name
+    FROM campaigns c
+    WHERE c.status = 'active'
+      AND (c.daily_sending_limit_email > 0 OR c.daily_sending_limit_linkedin > 0)
+  LOOP
     -- Check if this campaign needs research
     SELECT * INTO research_check
     FROM should_create_lead_research_jobs(campaign_rec.id);
@@ -166,7 +165,7 @@ BEGIN
     END IF;
   END LOOP;
   
-  RETURN NEW;
+  RETURN NULL;  -- Statement-level triggers should return NULL
 END;
 $$ LANGUAGE plpgsql;
 
@@ -186,5 +185,5 @@ EXECUTE FUNCTION handle_lead_research_trigger();
 -- Add helpful comments
 COMMENT ON FUNCTION should_create_lead_research_jobs IS 'Checks if a campaign needs lead research based on daily sending limits and scheduled messages';
 COMMENT ON FUNCTION handle_lead_research_trigger IS 'Creates lead_research jobs when campaigns need more messages to reach daily limits';
-COMMENT ON TRIGGER lead_research_trigger ON public.messages IS 'Monitors message changes and triggers lead research when daily limits aren\'t met';
+COMMENT ON TRIGGER lead_research_trigger ON public.messages IS 'Monitors message changes and triggers lead research when daily limits aren''t met';
 COMMENT ON TRIGGER lead_research_on_lead_change_trigger ON public.leads IS 'Monitors lead status changes and triggers research for newly enriched leads';
