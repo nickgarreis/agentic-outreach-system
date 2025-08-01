@@ -5,6 +5,8 @@
 
 -- Step 1: Clean up any partial migration state
 DO $$
+DECLARE
+    constraint_name text;
 BEGIN
     -- Drop all dependent objects that might exist
     DROP VIEW IF EXISTS message_tracking_status CASCADE;
@@ -27,6 +29,20 @@ BEGIN
         ALTER TABLE public.messages ALTER COLUMN status TYPE text USING status::text;
         RAISE NOTICE 'Converted status column back to text for clean migration';
     END IF;
+    
+    -- Drop any CHECK constraints on the status column
+    FOR constraint_name IN 
+        SELECT con.conname
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = ANY(con.conkey)
+        WHERE rel.relname = 'messages'
+        AND att.attname = 'status'
+        AND con.contype = 'c'
+    LOOP
+        EXECUTE format('ALTER TABLE public.messages DROP CONSTRAINT IF EXISTS %I', constraint_name);
+        RAISE NOTICE 'Dropped CHECK constraint: %', constraint_name;
+    END LOOP;
     
     -- Drop enum type and any casts if they exist
     DROP CAST IF EXISTS (varchar AS message_status);
@@ -70,9 +86,32 @@ CREATE TYPE message_status AS ENUM (
 COMMENT ON TYPE message_status IS 'Valid status values for messages with their lifecycle meanings';
 
 -- Step 4: Convert the column to enum type
+-- First drop any indexes on the status column
+DO $$
+DECLARE
+    idx_name text;
+BEGIN
+    FOR idx_name IN 
+        SELECT indexname 
+        FROM pg_indexes 
+        WHERE tablename = 'messages' 
+        AND indexdef LIKE '%status%'
+    LOOP
+        EXECUTE format('DROP INDEX IF EXISTS %I', idx_name);
+        RAISE NOTICE 'Dropped index: %', idx_name;
+    END LOOP;
+END$$;
+
+-- Now convert the column using double casting to avoid comparison issues
 ALTER TABLE public.messages 
-    ALTER COLUMN status DROP DEFAULT,
-    ALTER COLUMN status TYPE message_status USING status::message_status,
+    ALTER COLUMN status DROP DEFAULT;
+
+-- Use double casting (text -> text -> enum) which avoids the comparison error
+ALTER TABLE public.messages 
+    ALTER COLUMN status TYPE message_status 
+    USING status::text::message_status;
+
+ALTER TABLE public.messages 
     ALTER COLUMN status SET DEFAULT 'draft'::message_status;
 
 COMMENT ON COLUMN public.messages.status IS 'Current status of the message in its lifecycle';
