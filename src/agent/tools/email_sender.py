@@ -1,112 +1,90 @@
 # src/agent/tools/email_sender.py
-# SendGrid email sender tool for automated outreach campaigns
-# Handles email sending, tracking, and error management
-# RELEVANT FILES: base_tools.py, database_tools.py, message_scheduler.py
+# Simplified SendGrid email sender tool for automated outreach campaigns
+# Handles email sending with per-campaign API keys for multi-client support
+# RELEVANT FILES: base_tools.py, database_tools.py, autopilot_agent.py
 
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-import json
 import asyncio
 
 # SendGrid imports
-try:
-    from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail, Email, To, Content, Personalization
-except ImportError:
-    SendGridAPIClient = None
-    Mail = None
-    logger.warning("SendGrid library not installed. Email sending will fail.")
-
 from ..agentops_config import track_tool
 from .base_tools import BaseTools, ToolResult
 
 logger = logging.getLogger(__name__)
 
+# SendGrid imports
+try:
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail, Email, To, Content, Personalization, From
+except ImportError:
+    SendGridAPIClient = None
+    Mail = None
+    logger.warning("SendGrid library not installed. Email sending will fail.")
+
 
 class EmailError:
-    """Email error categorization for better error handling"""
+    """Simplified email error categorization"""
     
     # Error categories
     RATE_LIMIT = "rate_limit"
     AUTHENTICATION = "authentication"
     INVALID_EMAIL = "invalid_email"
-    CONTENT_ERROR = "content_error"
-    NETWORK_ERROR = "network_error"
     TEMPORARY_ERROR = "temporary_error"
     PERMANENT_ERROR = "permanent_error"
     UNKNOWN = "unknown"
     
-    # Error patterns for categorization
-    ERROR_PATTERNS = {
-        RATE_LIMIT: ["rate limit", "too many requests", "429"],
-        AUTHENTICATION: ["unauthorized", "invalid api key", "401", "403"],
-        INVALID_EMAIL: ["invalid email", "bad recipient", "invalid address", "550"],
-        CONTENT_ERROR: ["content", "spam", "blocked", "rejected"],
-        NETWORK_ERROR: ["connection", "timeout", "network", "dns"],
-        TEMPORARY_ERROR: ["temporary", "try again", "503", "504"],
-        PERMANENT_ERROR: ["permanent", "bounce", "551", "552", "553"]
-    }
+    # Retryable error categories
+    RETRYABLE_CATEGORIES = {RATE_LIMIT, TEMPORARY_ERROR}
     
     @classmethod
     def categorize(cls, error_message: str) -> tuple[str, bool]:
         """
-        Categorize an error message and determine if it's retryable.
-        
-        Args:
-            error_message: The error message to categorize
-            
-        Returns:
-            Tuple of (category, is_retryable)
+        Categorize an error and determine if it's retryable.
+        Simplified to focus on key error types.
         """
         error_lower = str(error_message).lower()
         
-        # Check each category pattern
-        for category, patterns in cls.ERROR_PATTERNS.items():
-            for pattern in patterns:
-                if pattern in error_lower:
-                    # Determine if retryable based on category
-                    is_retryable = category in [
-                        cls.RATE_LIMIT, 
-                        cls.NETWORK_ERROR, 
-                        cls.TEMPORARY_ERROR
-                    ]
-                    return category, is_retryable
+        # Check for specific error patterns
+        if any(code in error_lower for code in ["429", "rate limit", "too many"]):
+            return cls.RATE_LIMIT, True
+        elif any(code in error_lower for code in ["401", "403", "unauthorized", "invalid api key"]):
+            return cls.AUTHENTICATION, False
+        elif any(code in error_lower for code in ["550", "invalid email", "bad recipient"]):
+            return cls.INVALID_EMAIL, False
+        elif any(code in error_lower for code in ["503", "504", "temporary", "timeout"]):
+            return cls.TEMPORARY_ERROR, True
+        elif any(code in error_lower for code in ["551", "552", "553", "bounce", "permanent"]):
+            return cls.PERMANENT_ERROR, False
         
-        # Default to unknown, not retryable
         return cls.UNKNOWN, False
 
 
 class EmailSender(BaseTools):
     """
-    Email sender tool that integrates with SendGrid.
-    Handles batch sending, tracking, and error management.
+    Simplified email sender tool that integrates with SendGrid.
+    Supports per-campaign API keys for multi-client environments.
+    Uses SendGrid SDK's native features for batch sending and error handling.
     """
     
     # SendGrid rate limits
     RATE_LIMIT_PER_SECOND = 100  # SendGrid allows 100 emails/second
-    BATCH_SIZE = 100  # Maximum emails per batch
+    BATCH_SIZE = 100  # Maximum emails per batch for personalizations
     MAX_RETRIES = 3  # Maximum retry attempts
-    
-    # Connection pool settings
-    MAX_POOL_SIZE = 10  # Maximum number of SendGrid clients per API key
-    POOL_TIMEOUT = 300  # Client expiration time in seconds (5 minutes)
     
     def __init__(self):
         """Initialize the email sender"""
         super().__init__()
         self.logger = logger
-        self._api_clients = {}  # Cache SendGrid clients by API key
-        self._client_timestamps = {}  # Track client creation times
-        self._client_usage_count = {}  # Track usage for round-robin
         
-    def _get_sendgrid_client(self, api_key: str) -> Optional[SendGridAPIClient]:
+    def _create_sendgrid_client(self, api_key: str) -> Optional[SendGridAPIClient]:
         """
-        Get or create a SendGrid client from the connection pool.
-        Implements round-robin load balancing and connection recycling.
+        Create a SendGrid client with the provided API key.
+        No connection pooling - let SendGrid SDK handle connection management.
         
         Args:
-            api_key: SendGrid API key
+            api_key: SendGrid API key for the campaign
             
         Returns:
             SendGridAPIClient instance or None if invalid
@@ -115,132 +93,82 @@ class EmailSender(BaseTools):
             self.logger.error("No SendGrid API key provided")
             return None
         
-        current_time = datetime.utcnow().timestamp()
-        
-        # Initialize pool for this API key if needed
-        if api_key not in self._api_clients:
-            self._api_clients[api_key] = []
-            self._client_timestamps[api_key] = []
-            self._client_usage_count[api_key] = 0
-        
-        # Clean up expired clients
-        self._cleanup_expired_clients(api_key, current_time)
-        
-        # Get existing client or create new one
-        client_pool = self._api_clients[api_key]
-        
-        if client_pool:
-            # Round-robin selection
-            index = self._client_usage_count[api_key] % len(client_pool)
-            self._client_usage_count[api_key] += 1
-            return client_pool[index]
-        
-        # Create new client if pool is empty or below max size
-        if len(client_pool) < self.MAX_POOL_SIZE:
-            try:
-                client = SendGridAPIClient(api_key)
-                self._api_clients[api_key].append(client)
-                self._client_timestamps[api_key].append(current_time)
-                self.logger.info(f"Created new SendGrid client (pool size: {len(client_pool) + 1})")
-                return client
-            except Exception as e:
-                self.logger.error(f"Failed to create SendGrid client: {e}")
-                return None
-        
-        # Pool is at max size, return least recently used
-        return client_pool[0]
-    
-    def _cleanup_expired_clients(self, api_key: str, current_time: float):
-        """
-        Remove expired clients from the pool.
-        
-        Args:
-            api_key: SendGrid API key
-            current_time: Current timestamp
-        """
-        if api_key not in self._client_timestamps:
-            return
-        
-        # Find indices of non-expired clients
-        valid_indices = [
-            i for i, timestamp in enumerate(self._client_timestamps[api_key])
-            if current_time - timestamp < self.POOL_TIMEOUT
-        ]
-        
-        # Keep only valid clients
-        if len(valid_indices) < len(self._api_clients[api_key]):
-            self._api_clients[api_key] = [
-                self._api_clients[api_key][i] for i in valid_indices
-            ]
-            self._client_timestamps[api_key] = [
-                self._client_timestamps[api_key][i] for i in valid_indices
-            ]
-            self.logger.info(
-                f"Cleaned up {len(self._api_clients[api_key]) - len(valid_indices)} "
-                f"expired clients for API key ending in ...{api_key[-4:]}"
-            )
+        try:
+            # Create a new client instance - SendGrid SDK handles connection pooling internally
+            client = SendGridAPIClient(api_key)
+            return client
+        except Exception as e:
+            self.logger.error(f"Failed to create SendGrid client: {e}")
+            return None
     
     @track_tool("send_email")
     async def send_email(
         self,
         message_data: Dict[str, Any],
         api_key: str,
-        campaign_footer: Optional[Dict[str, Any]] = None
+        campaign_footer: Optional[Dict[str, Any]] = None,
+        reply_to_domain: Optional[str] = None,
+        from_email: str = "noreply@example.com",
+        from_name: Optional[str] = None
     ) -> ToolResult:
         """
         Send a single email via SendGrid.
-        
-        Args:
-            message_data: Message record from database
-            api_key: SendGrid API key
-            campaign_footer: Optional campaign footer configuration
-            
-        Returns:
-            ToolResult with send status and tracking info
+        Simplified to use SendGrid SDK directly.
         """
+        sg_client = self._create_sendgrid_client(api_key)
+        if not sg_client:
+            return ToolResult(
+                success=False,
+                error="Invalid or missing SendGrid API key"
+            )
+        
+        # Get lead data
+        lead_data = await self._get_lead_data(message_data['lead_id'])
+        if not lead_data or not lead_data.get('email'):
+            return ToolResult(
+                success=False,
+                error=f"Lead {message_data['lead_id']} not found or missing email"
+            )
+        
         try:
-            sg_client = self._get_sendgrid_client(api_key)
-            if not sg_client:
-                return ToolResult(
-                    success=False,
-                    error="Invalid or missing SendGrid API key"
-                )
-            
-            # Get lead data for personalization
-            lead_data = await self._get_lead_data(message_data['lead_id'])
-            if not lead_data:
-                return ToolResult(
-                    success=False,
-                    error=f"Lead {message_data['lead_id']} not found"
-                )
-            
-            # Format email content with personalization
+            # Create personalized content
+            personalized_content = self._personalize_text(
+                message_data.get('content', ''), lead_data
+            )
             formatted_content = self._format_email_content(
-                content=message_data['content'],
-                lead_data=lead_data,
-                campaign_footer=campaign_footer
+                personalized_content, lead_data, campaign_footer
             )
             
             # Create SendGrid message
             message = Mail(
-                from_email=Email("noreply@example.com"),  # TODO: Make this configurable
+                from_email=From(from_email, from_name),
                 to_emails=To(lead_data['email']),
-                subject=self._personalize_text(message_data['subject'], lead_data),
+                subject=self._personalize_text(message_data.get('subject', ''), lead_data),
                 html_content=Content("text/html", formatted_content)
             )
             
-            # Send email
+            # Add custom args for tracking
+            message.custom_args = {
+                'message_id': str(message_data['id']),
+                'campaign_id': str(message_data.get('campaign_id', '')),
+                'lead_id': str(message_data.get('lead_id', ''))
+            }
+            
+            # Add Reply-To if configured
+            if reply_to_domain:
+                reply_to_email = f"reply+{message_data['id']}@{reply_to_domain}"
+                message.reply_to = Email(reply_to_email)
+                message.add_header('Message-ID', f"<{message_data['id']}@{reply_to_domain}>")
+            
+            # Send the email
             response = sg_client.send(message)
             
-            # Extract message ID from response headers
+            # Extract SendGrid message ID
             sendgrid_message_id = None
             if hasattr(response, 'headers') and 'X-Message-Id' in response.headers:
                 sendgrid_message_id = response.headers['X-Message-Id']
             
-            self.logger.info(
-                f"Email sent successfully to {lead_data['email']} "
-                f"(Message ID: {sendgrid_message_id})"
-            )
+            self.logger.info(f"Email sent to {lead_data['email']}")
             
             return ToolResult(
                 success=True,
@@ -248,26 +176,19 @@ class EmailSender(BaseTools):
                     "message_id": message_data['id'],
                     "sendgrid_message_id": sendgrid_message_id,
                     "status_code": response.status_code,
-                    "sent_to": lead_data['email'],
-                    "sent_at": datetime.utcnow().isoformat()
+                    "sent_to": lead_data['email']
                 }
             )
             
         except Exception as e:
-            error_msg = str(e)
-            error_category, is_retryable = EmailError.categorize(error_msg)
-            
-            self.logger.error(
-                f"Failed to send email: {e} "
-                f"(Category: {error_category}, Retryable: {is_retryable})"
-            )
+            error_category, is_retryable = EmailError.categorize(str(e))
+            self.logger.error(f"Email send failed: {e}")
             
             return ToolResult(
                 success=False,
-                error=error_msg,
+                error=str(e),
                 data={
                     "message_id": message_data['id'],
-                    "error_type": type(e).__name__,
                     "error_category": error_category,
                     "is_retryable": is_retryable
                 }
@@ -281,132 +202,113 @@ class EmailSender(BaseTools):
         campaign_footer: Optional[Dict[str, Any]] = None,
         from_email: str = "noreply@example.com",
         from_name: Optional[str] = None,
-        retry_attempts: int = 0
+        retry_attempts: int = 0,
+        reply_to_domain: Optional[str] = None
     ) -> ToolResult:
         """
-        Send multiple emails in batch via SendGrid using personalizations.
+        Send multiple emails in batch via SendGrid.
+        Simplified to use SendGrid's native batch capabilities.
         
         Args:
             messages: List of message records from database
-            api_key: SendGrid API key
-            campaign_footer: Optional campaign footer configuration
+            api_key: SendGrid API key for the campaign
+            campaign_footer: Optional campaign footer configuration  
             from_email: Sender email address
-            from_name: Sender name
+            from_name: Sender display name
+            reply_to_domain: Optional domain for reply-to addresses
             
         Returns:
             ToolResult with batch send results
         """
-        try:
-            if not messages:
-                return ToolResult(
-                    success=True,
-                    data={"sent": 0, "failed": 0, "results": []}
-                )
-            
-            sg_client = self._get_sendgrid_client(api_key)
-            if not sg_client:
-                return ToolResult(
-                    success=False,
-                    error="Invalid or missing SendGrid API key"
-                )
-            
-            # Process in chunks to respect rate limits
-            results = []
-            sent_count = 0
-            failed_count = 0
-            
-            # Process messages in batches using SendGrid's batch API
-            for i in range(0, len(messages), self.BATCH_SIZE):
-                batch = messages[i:i + self.BATCH_SIZE]
-                
-                # Use asyncio.to_thread for true async with sync SDK
-                batch_result = await asyncio.to_thread(
-                    self._send_batch_with_personalizations,
-                    batch, sg_client, campaign_footer, from_email, from_name
-                )
-                
-                # Process results
-                sent_count += batch_result['sent']
-                failed_count += batch_result['failed']
-                results.extend(batch_result['results'])
-                
-                # Rate limiting - ensure we don't exceed 100 emails/second
-                if i + self.BATCH_SIZE < len(messages):
-                    await asyncio.sleep(1)  # Wait 1 second between batches
-            
-            self.logger.info(
-                f"Batch email send completed: {sent_count} sent, {failed_count} failed"
-            )
-            
+        if not messages:
             return ToolResult(
                 success=True,
-                data={
-                    "sent": sent_count,
-                    "failed": failed_count,
-                    "total": len(messages),
-                    "results": results
-                }
+                data={"sent": 0, "failed": 0, "results": []}
             )
-            
-        except Exception as e:
-            error_msg = str(e)
-            error_category, is_retryable = EmailError.categorize(error_msg)
-            self.logger.error(
-                f"Batch email send failed: {e} "
-                f"(Category: {error_category}, Retryable: {is_retryable})"
-            )
+        
+        sg_client = self._create_sendgrid_client(api_key)
+        if not sg_client:
             return ToolResult(
                 success=False,
-                error=f"Batch send failed: {error_msg}",
-                data={
-                    "error_category": error_category,
-                    "is_retryable": is_retryable
-                }
+                error="Invalid or missing SendGrid API key"
             )
+        
+        results = []
+        sent_count = 0
+        failed_count = 0
+        
+        # Process messages in batches respecting SendGrid limits
+        for i in range(0, len(messages), self.BATCH_SIZE):
+            batch = messages[i:i + self.BATCH_SIZE]
+            
+            # Send this batch
+            batch_result = await self._send_batch_with_personalizations(
+                batch, sg_client, campaign_footer, from_email, from_name, reply_to_domain
+            )
+            
+            # Aggregate results
+            sent_count += batch_result['sent']
+            failed_count += batch_result['failed']
+            results.extend(batch_result['results'])
+            
+            # Rate limit between batches
+            if i + self.BATCH_SIZE < len(messages):
+                await asyncio.sleep(1)
+        
+        self.logger.info(
+            f"Batch send complete: {sent_count} sent, {failed_count} failed"
+        )
+        
+        return ToolResult(
+            success=True,
+            data={
+                "sent": sent_count,
+                "failed": failed_count,
+                "total": len(messages),
+                "results": results
+            }
+        )
     
-    def _send_batch_with_personalizations(
+    async def _send_batch_with_personalizations(
         self,
         messages: List[Dict[str, Any]],
         sg_client: SendGridAPIClient,
         campaign_footer: Optional[Dict[str, Any]],
         from_email: str,
-        from_name: Optional[str]
+        from_name: Optional[str],
+        reply_to_domain: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Send a batch of emails using SendGrid's personalizations feature.
-        This runs in a thread for async compatibility.
-        Optimized version that groups messages with identical content.
+        Send a batch of emails using SendGrid's personalizations.
+        Groups messages by content template for efficiency.
         """
-        from sendgrid.helpers.mail import Mail, From, Personalization, To, Content
-        
         sent = 0
         failed = 0
         results = []
         
-        # Group messages by content hash to optimize sending
+        # Group messages by content template
         content_groups = {}
         
-        # First, fetch all lead data and group by content
         for msg in messages:
             try:
-                lead_data = self._get_lead_data_sync(msg['lead_id'])
+                # Fetch lead data
+                lead_data = await self._get_lead_data(msg['lead_id'])
                 if not lead_data or not lead_data.get('email'):
                     results.append({
                         "message_id": msg['id'],
-                        "error": "Lead data not found or missing email",
-                        "error_category": "invalid_email",
+                        "error": "Lead not found or missing email",
+                        "error_category": EmailError.INVALID_EMAIL,
                         "is_retryable": False
                     })
                     failed += 1
                     continue
                 
-                # Create content hash for grouping
+                # Group by subject and content template
                 content_key = f"{msg.get('subject', '')}||{msg.get('content', '')}"
-                
                 if content_key not in content_groups:
                     content_groups[content_key] = {
-                        'subject': msg.get('subject', ''),
-                        'content': msg.get('content', ''),
+                        'subject_template': msg.get('subject', ''),
+                        'content_template': msg.get('content', ''),
                         'recipients': []
                     }
                 
@@ -416,118 +318,92 @@ class EmailSender(BaseTools):
                 })
                 
             except Exception as e:
-                error_msg = str(e)
-                error_category, is_retryable = EmailError.categorize(error_msg)
-                self.logger.error(f"Failed to fetch lead data for message {msg['id']}: {e}")
+                error_category, is_retryable = EmailError.categorize(str(e))
+                self.logger.error(f"Failed to prepare message {msg['id']}: {e}")
                 results.append({
                     "message_id": msg['id'],
-                    "error": error_msg,
+                    "error": str(e),
                     "error_category": error_category,
                     "is_retryable": is_retryable
                 })
                 failed += 1
         
-        # Send each content group as a batch
-        for content_key, group_data in content_groups.items():
+        # Send each content group
+        for group_data in content_groups.values():
             if not group_data['recipients']:
                 continue
-            
-            # Create Mail object for this content group
+                
+            # Create Mail object for this group
             mail = Mail()
             mail.from_email = From(from_email, from_name)
             
-            # Use the content as template with placeholders
-            content_template = group_data['content']
-            formatted_content = self._format_email_content(
-                content_template,
-                {},  # Leave placeholders for substitution
+            # Use the first message's content as base template
+            base_content = self._format_email_content(
+                group_data['content_template'],
+                {},  # Empty dict for template
                 campaign_footer
             )
-            mail.add_content(Content("text/html", formatted_content))
+            mail.add_content(Content("text/html", base_content))
             
-            # Add personalizations for all recipients with same content
+            # Add personalizations
             for recipient_data in group_data['recipients']:
                 msg = recipient_data['message']
                 lead_data = recipient_data['lead']
                 
-                try:
-                    # Create personalization
-                    personalization = Personalization()
-                    personalization.add_to(To(lead_data['email']))
-                    
-                    # Set personalized subject
-                    personalization.subject = self._personalize_text(
-                        group_data['subject'], lead_data
-                    )
-                    
-                    # Add substitutions for dynamic content
-                    substitutions = {
-                        '{{first_name}}': lead_data.get('first_name', ''),
-                        '{{last_name}}': lead_data.get('last_name', ''),
-                        '{{full_name}}': f"{lead_data.get('first_name', '')} {lead_data.get('last_name', '')}".strip(),
-                        '{{company}}': lead_data.get('company', ''),
-                        '{{title}}': lead_data.get('title', ''),
-                        '{{email}}': lead_data.get('email', '')
-                    }
-                    
-                    for key, value in substitutions.items():
-                        personalization.add_substitution(key, value)
-                    
-                    # Add custom args for tracking
-                    personalization.add_custom_arg('message_id', str(msg['id']))
-                    personalization.add_custom_arg('campaign_id', str(msg.get('campaign_id', '')))
-                    personalization.add_custom_arg('lead_id', str(msg.get('lead_id', '')))
-                    
-                    mail.add_personalization(personalization)
-                    
-                except Exception as e:
-                    error_msg = str(e)
-                    error_category, is_retryable = EmailError.categorize(error_msg)
-                    self.logger.error(f"Failed to add personalization for message {msg['id']}: {e}")
+                personalization = Personalization()
+                personalization.add_to(To(lead_data['email']))
+                
+                # Personalized subject
+                personalization.subject = self._personalize_text(
+                    group_data['subject_template'], lead_data
+                )
+                
+                # Add substitutions for personalization
+                for key, value in self._get_personalization_substitutions(lead_data).items():
+                    personalization.add_substitution(key, value)
+                
+                # Add tracking
+                personalization.add_custom_arg('message_id', str(msg['id']))
+                personalization.add_custom_arg('campaign_id', str(msg.get('campaign_id', '')))
+                personalization.add_custom_arg('lead_id', str(msg.get('lead_id', '')))
+                
+                # Reply-To header
+                if reply_to_domain:
+                    personalization.add_header('Reply-To', f"reply+{msg['id']}@{reply_to_domain}")
+                    personalization.add_header('Message-ID', f"<{msg['id']}@{reply_to_domain}>")
+                
+                mail.add_personalization(personalization)
+            
+            # Send this batch
+            try:
+                response = sg_client.send(mail)
+                sent += len(mail.personalizations)
+                
+                sendgrid_message_id = None
+                if hasattr(response, 'headers') and 'X-Message-Id' in response.headers:
+                    sendgrid_message_id = response.headers['X-Message-Id']
+                
+                for personalization in mail.personalizations:
+                    msg_id = personalization.custom_args.get('message_id')
                     results.append({
-                        "message_id": msg['id'],
-                        "error": error_msg,
+                        "message_id": msg_id,
+                        "sendgrid_message_id": sendgrid_message_id,
+                        "status_code": response.status_code
+                    })
+                    
+            except Exception as e:
+                error_category, is_retryable = EmailError.categorize(str(e))
+                self.logger.error(f"Batch send failed: {e}")
+                failed += len(mail.personalizations)
+                
+                for personalization in mail.personalizations:
+                    msg_id = personalization.custom_args.get('message_id')
+                    results.append({
+                        "message_id": msg_id,
+                        "error": str(e),
                         "error_category": error_category,
                         "is_retryable": is_retryable
                     })
-                    failed += 1
-            
-            # Send this batch if it has personalizations
-            if mail.personalizations:
-                try:
-                    # Send the batch
-                    response = sg_client.send(mail)
-                    
-                    # All personalizations sent successfully
-                    sent += len(mail.personalizations)
-                    
-                    # Extract message ID if available
-                    sendgrid_message_id = None
-                    if hasattr(response, 'headers') and 'X-Message-Id' in response.headers:
-                        sendgrid_message_id = response.headers['X-Message-Id']
-                    
-                    # Add success results for each message
-                    for personalization in mail.personalizations:
-                        msg_id = personalization.custom_args.get('message_id')
-                        results.append({
-                            "message_id": msg_id,
-                            "sendgrid_message_id": sendgrid_message_id,
-                            "status_code": response.status_code
-                        })
-                    
-                except Exception as e:
-                    error_msg = str(e)
-                    error_category, is_retryable = EmailError.categorize(error_msg)
-                    self.logger.error(f"Batch send failed: {e}")
-                    failed += len(mail.personalizations)
-                    for personalization in mail.personalizations:
-                        msg_id = personalization.custom_args.get('message_id')
-                        results.append({
-                            "message_id": msg_id,
-                            "error": error_msg,
-                            "error_category": error_category,
-                            "is_retryable": is_retryable
-                        })
         
         return {
             'sent': sent,
@@ -535,35 +411,6 @@ class EmailSender(BaseTools):
             'results': results
         }
     
-    def _get_lead_data_sync(self, lead_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Synchronous version of lead data fetching for use in threads.
-        Uses a synchronous Supabase client to avoid event loop issues.
-        """
-        try:
-            # Import sync client only when needed
-            from supabase import create_client
-            from ...config import get_settings
-            
-            settings = get_settings()
-            
-            # Create sync Supabase client
-            sync_client = create_client(
-                settings.supabase_url,
-                settings.supabase_publishable_key
-            )
-            
-            # Fetch lead data synchronously
-            response = sync_client.table("leads")\
-                .select("*")\
-                .eq("id", lead_id)\
-                .single()\
-                .execute()
-            
-            return response.data
-        except Exception as e:
-            self.logger.error(f"Failed to fetch lead data sync: {e}")
-            return None
     
     async def _get_lead_data(self, lead_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -594,38 +441,26 @@ class EmailSender(BaseTools):
         campaign_footer: Optional[Dict[str, Any]] = None
     ) -> str:
         """
-        Format email content with personalization and footer.
-        
-        Args:
-            content: Raw email content
-            lead_data: Lead information for personalization
-            campaign_footer: Campaign footer configuration
-            
-        Returns:
-            Formatted HTML email content
+        Format email content with optional footer.
+        Simplified HTML generation.
         """
-        # Personalize content
-        personalized_content = self._personalize_text(content, lead_data)
-        
         # Convert plain text to HTML if needed
-        if not personalized_content.strip().startswith('<'):
-            # Simple plain text to HTML conversion
-            personalized_content = personalized_content.replace('\n', '<br>\n')
-            personalized_content = f"<p>{personalized_content}</p>"
+        if not content.strip().startswith('<'):
+            content = content.replace('\n', '<br>\n')
+            content = f"<p>{content}</p>"
         
-        # Add campaign footer if configured
+        # Add footer if enabled
         footer_html = ""
         if campaign_footer and campaign_footer.get('enabled'):
             footer_template = campaign_footer.get('template', '')
             footer_html = f"""
-            <br><br>
-            <hr style="border: 1px solid #eee;">
-            <div style="margin-top: 20px; font-size: 12px; color: #666;">
+            <hr style="border: 1px solid #eee; margin: 30px 0 20px;">
+            <div style="font-size: 12px; color: #666;">
                 {self._personalize_text(footer_template, lead_data)}
             </div>
             """
         
-        # Wrap in basic HTML template
+        # Simple HTML wrapper
         return f"""
         <!DOCTYPE html>
         <html>
@@ -633,8 +468,8 @@ class EmailSender(BaseTools):
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
         </head>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            {personalized_content}
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; padding: 20px;">
+            {content}
             {footer_html}
         </body>
         </html>
@@ -652,7 +487,25 @@ class EmailSender(BaseTools):
             Personalized text
         """
         # Common personalization variables
-        replacements = {
+        replacements = self._get_personalization_substitutions(lead_data)
+        
+        # Replace all variables
+        for var, value in replacements.items():
+            text = text.replace(var, value or '')
+        
+        return text
+    
+    def _get_personalization_substitutions(self, lead_data: Dict[str, Any]) -> Dict[str, str]:
+        """
+        Get standard personalization substitutions for a lead.
+        
+        Args:
+            lead_data: Lead information
+            
+        Returns:
+            Dictionary of variable names to values
+        """
+        return {
             '{{first_name}}': lead_data.get('first_name', ''),
             '{{last_name}}': lead_data.get('last_name', ''),
             '{{full_name}}': f"{lead_data.get('first_name', '')} {lead_data.get('last_name', '')}".strip(),
@@ -660,12 +513,6 @@ class EmailSender(BaseTools):
             '{{title}}': lead_data.get('title', ''),
             '{{email}}': lead_data.get('email', '')
         }
-        
-        # Replace all variables
-        for var, value in replacements.items():
-            text = text.replace(var, value or '')
-        
-        return text
     
     @track_tool("update_message_status")
     async def update_message_status(
@@ -730,30 +577,6 @@ class EmailSender(BaseTools):
                 error=f"Failed to update status: {str(e)}"
             )
     
-    def get_pool_stats(self) -> Dict[str, Any]:
-        """
-        Get connection pool statistics for monitoring.
-        
-        Returns:
-            Dictionary with pool statistics per API key
-        """
-        stats = {}
-        for api_key in self._api_clients:
-            # Mask API key for security
-            masked_key = f"...{api_key[-8:]}" if len(api_key) > 8 else "***"
-            stats[masked_key] = {
-                "pool_size": len(self._api_clients.get(api_key, [])),
-                "total_requests": self._client_usage_count.get(api_key, 0),
-                "oldest_client_age": None
-            }
-            
-            # Calculate oldest client age
-            if api_key in self._client_timestamps and self._client_timestamps[api_key]:
-                oldest_timestamp = min(self._client_timestamps[api_key])
-                age_seconds = datetime.utcnow().timestamp() - oldest_timestamp
-                stats[masked_key]["oldest_client_age"] = round(age_seconds, 2)
-        
-        return stats
     
     async def retry_failed_messages(
         self,
@@ -762,7 +585,8 @@ class EmailSender(BaseTools):
         api_key: str,
         campaign_footer: Optional[Dict[str, Any]] = None,
         from_email: str = "noreply@example.com",
-        from_name: Optional[str] = None
+        from_name: Optional[str] = None,
+        reply_to_domain: Optional[str] = None
     ) -> ToolResult:
         """
         Retry sending messages that failed with retryable errors.
@@ -774,6 +598,7 @@ class EmailSender(BaseTools):
             campaign_footer: Optional campaign footer
             from_email: Sender email
             from_name: Sender name
+            reply_to_domain: Optional domain for reply-to addresses
             
         Returns:
             ToolResult with retry results
@@ -809,5 +634,6 @@ class EmailSender(BaseTools):
             campaign_footer=campaign_footer,
             from_email=from_email,
             from_name=from_name,
-            retry_attempts=1
+            retry_attempts=1,
+            reply_to_domain=reply_to_domain
         )

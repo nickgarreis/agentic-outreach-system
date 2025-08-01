@@ -662,9 +662,6 @@ class AutopilotAgent:
             f"{final_failed} failed out of {len(messages)} messages"
         )
         
-        # Get pool statistics for monitoring
-        pool_stats = self.email_sender.get_pool_stats()
-        
         return {
             "campaign_id": campaign_id,
             "campaign_name": campaign_data.get("name"),
@@ -678,6 +675,5 @@ class AutopilotAgent:
             "final_failed": final_failed,
             "results": results,
             "retry_results": retry_results,
-            "pool_stats": pool_stats,
             "status": "completed"
         }
