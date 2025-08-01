@@ -35,6 +35,10 @@ SET status = 'failed'
 WHERE status IS NOT NULL 
   AND status NOT IN ('draft', 'scheduled', 'sent', 'delivered', 'failed', 'retry_pending', 'bounced', 'unsubscribed');
 
+-- Drop the view that depends on the status column
+-- This is necessary because PostgreSQL doesn't allow altering columns used by views
+DROP VIEW IF EXISTS message_tracking_status;
+
 -- Drop the existing default first (required for type conversion)
 ALTER TABLE public.messages 
 ALTER COLUMN status DROP DEFAULT;
@@ -48,6 +52,39 @@ USING status::message_status;
 -- Add a default value for new messages
 ALTER TABLE public.messages 
 ALTER COLUMN status SET DEFAULT 'draft'::message_status;
+
+-- Recreate the message_tracking_status view
+-- This view was originally created in 20250801000013_add_inline_tracking_data.sql
+CREATE OR REPLACE VIEW message_tracking_status AS
+SELECT 
+  m.id,
+  m.campaign_id,
+  m.lead_id,
+  m.channel,
+  m.status,
+  m.send_at,
+  m.sent_at,
+  m.delivered_at,
+  m.opened_at,
+  m.clicked_at,
+  m.bounced_at,
+  m.unsubscribed_at,
+  CASE 
+    WHEN m.bounced_at IS NOT NULL THEN 'bounced'
+    WHEN m.unsubscribed_at IS NOT NULL THEN 'unsubscribed'
+    WHEN m.clicked_at IS NOT NULL THEN 'clicked'
+    WHEN m.opened_at IS NOT NULL THEN 'opened'
+    WHEN m.delivered_at IS NOT NULL THEN 'delivered'
+    WHEN m.sent_at IS NOT NULL THEN 'sent'
+    ELSE m.status
+  END as tracking_status,
+  jsonb_array_length(m.tracking_events) as event_count,
+  m.tracking_events
+FROM public.messages m
+WHERE m.channel = 'email';
+
+-- Re-grant access to the view
+GRANT SELECT ON message_tracking_status TO authenticated;
 
 -- Update column comment
 COMMENT ON COLUMN public.messages.status IS 'Current status of the message in its lifecycle';

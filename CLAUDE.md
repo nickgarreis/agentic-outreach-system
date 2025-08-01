@@ -139,3 +139,40 @@ ALTER TABLE my_table ALTER COLUMN my_column TYPE my_enum USING my_column::my_enu
 -- Step 4: Set new default with explicit cast
 ALTER TABLE my_table ALTER COLUMN my_column SET DEFAULT 'value1'::my_enum;
 ```
+
+### Handling View Dependencies
+When altering a column that's used by a view, PostgreSQL will error with "cannot alter type of a column used by a view or rule". You must:
+
+1. **Drop the view first**: `DROP VIEW IF EXISTS view_name;`
+2. **Make your column changes**
+3. **Recreate the view** with the same definition
+4. **Re-grant permissions** if needed
+
+Example:
+```sql
+-- Drop dependent views
+DROP VIEW IF EXISTS my_view;
+
+-- Alter the column
+ALTER TABLE my_table ALTER COLUMN my_column TYPE new_type;
+
+-- Recreate the view
+CREATE OR REPLACE VIEW my_view AS
+  SELECT * FROM my_table;
+  
+-- Re-grant permissions
+GRANT SELECT ON my_view TO authenticated;
+```
+
+To check for view dependencies before altering columns:
+```sql
+SELECT distinct dependee.relname, dependee.relkind 
+FROM pg_depend 
+JOIN pg_rewrite ON pg_depend.objid = pg_rewrite.oid 
+JOIN pg_class as dependee ON pg_rewrite.ev_class = dependee.oid 
+JOIN pg_class as dependent ON pg_depend.refobjid = dependent.oid 
+JOIN pg_attribute ON pg_depend.refobjid = pg_attribute.attrelid 
+    AND pg_depend.refobjsubid = pg_attribute.attnum 
+WHERE dependent.relname = 'your_table_name' 
+AND pg_attribute.attname = 'your_column_name';
+```
