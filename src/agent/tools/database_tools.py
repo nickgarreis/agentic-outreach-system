@@ -656,7 +656,6 @@ class DatabaseTools(BaseTools):
             # Prepare all messages with timestamps
             for msg in messages:
                 msg["created_at"] = datetime.utcnow().isoformat()
-                msg["updated_at"] = datetime.utcnow().isoformat()
                 # Ensure metadata is JSONB compatible
                 if "metadata" in msg and isinstance(msg["metadata"], dict):
                     msg["metadata"] = msg["metadata"]
