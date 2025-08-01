@@ -35,6 +35,10 @@ SET status = 'failed'
 WHERE status IS NOT NULL 
   AND status NOT IN ('draft', 'scheduled', 'sent', 'delivered', 'failed', 'retry_pending', 'bounced', 'unsubscribed');
 
+-- Drop the existing default first (required for type conversion)
+ALTER TABLE public.messages 
+ALTER COLUMN status DROP DEFAULT;
+
 -- Now alter the column to use the enum
 -- This requires casting the existing text values
 ALTER TABLE public.messages 

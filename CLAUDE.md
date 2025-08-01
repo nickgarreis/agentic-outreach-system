@@ -109,3 +109,33 @@ Each perspective represents a major feature:
   - Well-commented explaining the changes
 
 IMPORTANT: The Supabase MCP is READ-ONLY for safety. All modifications must go through proper migration files.
+
+## PostgreSQL Enum Migration Best Practices
+
+### Converting Text Columns to Enum
+When converting a text column to an enum type, always follow this pattern:
+
+1. **Drop the existing default**: `ALTER TABLE table_name ALTER COLUMN column_name DROP DEFAULT;`
+2. **Convert the column type**: `ALTER TABLE table_name ALTER COLUMN column_name TYPE enum_type USING column_name::enum_type;`
+3. **Set the new default**: `ALTER TABLE table_name ALTER COLUMN column_name SET DEFAULT 'value'::enum_type;`
+
+### Common Pitfalls
+- Never try to set a default value during the type conversion - PostgreSQL cannot cast defaults automatically
+- Always use explicit casting with `::enum_type` for defaults
+- Ensure all existing values match enum values before conversion
+- The error "default for column cannot be cast automatically to type" means you forgot to drop the default first
+
+### Template for Enum Migrations
+```sql
+-- Step 1: Create the enum type
+CREATE TYPE my_enum AS ENUM ('value1', 'value2', 'value3');
+
+-- Step 2: Drop existing default (CRITICAL - must be done before type conversion)
+ALTER TABLE my_table ALTER COLUMN my_column DROP DEFAULT;
+
+-- Step 3: Convert column type
+ALTER TABLE my_table ALTER COLUMN my_column TYPE my_enum USING my_column::my_enum;
+
+-- Step 4: Set new default with explicit cast
+ALTER TABLE my_table ALTER COLUMN my_column SET DEFAULT 'value1'::my_enum;
+```
