@@ -181,7 +181,10 @@ class AutopilotAgent:
                 
                 # Enrich lead data if we have basic info
                 enriched_email = None
+                enrichment_attempted = False
+                
                 if lead_info.get("first_name") or lead_info.get("email"):
+                    enrichment_attempted = True
                     try:
                         enriched = await self.apollo_enrich.execute(
                             first_name=lead_info.get("first_name"),
@@ -192,23 +195,30 @@ class AutopilotAgent:
                         )
                         
                         if enriched.success and enriched.data:
-                            # Get the enriched email for deduplication
                             enriched_email = enriched.data.get("email")
                             
-                            # Merge enriched data
-                            if enriched_email:
+                            # Only mark as enriched if we got a real email (not placeholder)
+                            if enriched_email and not enriched_email.endswith('@placeholder.com') and enriched_email != 'email_not_unlocked@domain.com':
                                 lead_info["email"] = enriched_email
+                                lead_info["full_context"]["enriched"] = True
+                            else:
+                                lead_info["full_context"]["enriched"] = False
+                            
+                            # Still save other enrichment data even if no real email
                             if require_phone and enriched.data.get("phone"):
                                 lead_info["phone"] = enriched.data["phone"]
-                            
-                            # Add enriched data to full_context
                             lead_info["full_context"]["personal_emails"] = enriched.data.get("personal_emails", [])
                             lead_info["full_context"]["linkedin_url"] = enriched.data.get("linkedin_url")
-                            lead_info["full_context"]["enriched"] = True
                             lead_info["full_context"]["enrichment_data"] = enriched.data
+                        else:
+                            # API call failed
+                            lead_info["full_context"]["enriched"] = False
+                            lead_info["full_context"]["enrichment_error"] = enriched.error if enriched else "Unknown error"
+                            
                     except Exception as e:
                         logger.warning(f"Failed to enrich lead {lead_info.get('email')}: {e}")
-                        # Continue without enrichment
+                        lead_info["full_context"]["enriched"] = False
+                        lead_info["full_context"]["enrichment_error"] = str(e)
                 
                 
                 # Add source tracking
@@ -223,8 +233,13 @@ class AutopilotAgent:
                 # Create new lead
                 lead_info["campaign_id"] = campaign_id
                 lead_info["client_id"] = job_data.get("client_id")  # If provided
-                # Set status based on enrichment success
-                lead_info["status"] = "enriched" if lead_info["full_context"].get("enriched", False) else "discovered"
+                # Set status based on enrichment results
+                if not enrichment_attempted:
+                    lead_info["status"] = "discovered"
+                elif lead_info["full_context"].get("enriched", False):
+                    lead_info["status"] = "enriched"
+                else:
+                    lead_info["status"] = "enrichment_failed"
                 
                 await supabase.table("leads").insert(lead_info).execute()
                 leads_created += 1
