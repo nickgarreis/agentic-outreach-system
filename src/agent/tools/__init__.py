@@ -3,10 +3,11 @@
 # Central hub for all tool categories
 # RELEVANT FILES: database_tools.py, base_tools.py
 
-from .base_tools import BaseTools
+from .base_tools import BaseTools, BaseTool, ToolResult
 from .database_tools import DatabaseTools
+from .apollo_search_tool import ApolloSearchTool
 
-__all__ = ["BaseTools", "DatabaseTools"]
+__all__ = ["BaseTools", "BaseTool", "ToolResult", "DatabaseTools", "ApolloSearchTool"]
 
 # For backwards compatibility and convenience
 # This allows: from agent.tools import DatabaseTools
