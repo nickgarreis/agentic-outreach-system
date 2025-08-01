@@ -24,6 +24,7 @@ email-validator>=2.0.0  # Required for pydantic email validation
 # AI and Agent dependencies
 agentops>=0.4.18  # Agent monitoring and observability
 openai>=1.0.0  # For OpenRouter API integration
+tavily-python>=0.3.0  # For web search and lead research
 
 # Testing
 pytest>=7.4.0

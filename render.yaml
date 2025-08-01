@@ -61,6 +61,8 @@ envVarGroups:
         value: 355ddee1-57fb-44ee-b45a-83fbb05503c8
       - key: APOLLO_API_KEY
         value: iOssre939n8k0pnVics_1Q
+      - key: TAVILY_API_KEY
+        value: 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
       - key: APP_NAME
         value: "Agentic Outreach Worker"
   
@@ -81,6 +83,8 @@ envVarGroups:
         value: 355ddee1-57fb-44ee-b45a-83fbb05503c8
       - key: APOLLO_API_KEY
         value: iOssre939n8k0pnVics_1Q
+      - key: TAVILY_API_KEY
+        value: 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
       - key: APP_NAME
         value: "Agentic Outreach Worker Dev"
 

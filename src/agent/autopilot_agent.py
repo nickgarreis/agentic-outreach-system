@@ -13,7 +13,7 @@ from ..config import get_settings
 from .agentops_config import (
     track_operation,
 )
-from .tools import DatabaseTools, ApolloSearchTool, ApolloEnrichTool
+from .tools import DatabaseTools, ApolloSearchTool, ApolloEnrichTool, TavilyTool
 from ..database import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ class AutopilotAgent:
         # Initialize individual tools
         self.apollo_search = ApolloSearchTool()
         self.apollo_enrich = ApolloEnrichTool()
+        self.tavily_tool = TavilyTool()
 
         # For backwards compatibility
         self.tools = self.db_tools
@@ -79,6 +80,8 @@ class AutopilotAgent:
             # Route to appropriate job handler based on job type
             if self.job_type == "campaign_active":
                 result = await self._handle_campaign_active(job_data)
+            elif self.job_type == "lead_research":
+                result = await self._handle_lead_research(job_data)
             else:
                 # Unknown job type
                 result = {
@@ -283,3 +286,108 @@ class AutopilotAgent:
         }).eq("id", campaign_id).execute()
         
         logger.info(f"Updated {platform} page number to {new_page} for campaign {campaign_id}")
+    
+    @track_operation("handle_lead_research")
+    async def _handle_lead_research(self, job_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle lead_research job type - research leads using Tavily.
+        
+        Args:
+            job_data: Contains lead_id to research
+            
+        Returns:
+            dict: Job execution results including research data
+        """
+        lead_id = job_data.get("lead_id")
+        
+        if not lead_id:
+            raise Exception("lead_id is required for lead_research job")
+        
+        logger.info(f"Starting lead research for lead: {lead_id}")
+        
+        # Get lead data from database
+        supabase = await get_supabase()
+        lead_response = await supabase.table("leads").select("*").eq(
+            "id", lead_id
+        ).single().execute()
+        
+        if not lead_response.data:
+            raise Exception(f"Lead {lead_id} not found")
+        
+        lead_data = lead_response.data
+        campaign_id = lead_data.get("campaign_id")
+        
+        # Get campaign data for context
+        campaign_response = await supabase.table("campaigns").select("*").eq(
+            "id", campaign_id
+        ).single().execute()
+        
+        campaign_data = campaign_response.data if campaign_response.data else {}
+        
+        logger.info(f"Researching lead: {lead_data.get('first_name')} {lead_data.get('last_name')} at {lead_data.get('company')}")
+        
+        # Execute Tavily research
+        research_result = await self.tavily_tool.execute(
+            lead_data=lead_data,
+            campaign_data=campaign_data
+        )
+        
+        if not research_result.success:
+            raise Exception(f"Tavily research failed: {research_result.error}")
+        
+        # Check if we have LinkedIn URL and extract additional content
+        linkedin_url = lead_data.get("full_context", {}).get("linkedin_url")
+        if linkedin_url:
+            self.logger.info(f"Extracting LinkedIn profile content for {linkedin_url}")
+            
+            try:
+                extract_result = await self.tavily_tool.extract_from_urls(
+                    urls=[linkedin_url],
+                    extract_depth="advanced"  # Use advanced for LinkedIn
+                )
+                
+                if extract_result.success:
+                    # Add LinkedIn extraction to research data
+                    research_result.data["linkedin_extraction"] = extract_result.data
+                    
+                    # Enhance research data with parsed LinkedIn information
+                    research_result.data = self.tavily_tool._enhance_research_with_linkedin(
+                        research_result.data,
+                        extract_result.data
+                    )
+                    
+                    self.logger.info("Successfully extracted and parsed LinkedIn profile content")
+            except Exception as e:
+                self.logger.warning(f"Failed to extract LinkedIn content: {e}")
+        
+        # Update lead with research data
+        existing_context = lead_data.get("full_context", {})
+        
+        # Merge research data into full_context
+        updated_context = {
+            **existing_context,
+            "tavily_research": research_result.data,
+            "researched_at": datetime.utcnow().isoformat()
+        }
+        
+        # Update lead in database
+        await supabase.table("leads").update({
+            "full_context": updated_context,
+            "status": "researched"
+        }).eq("id", lead_id).execute()
+        
+        logger.info(f"Lead research completed for {lead_id}")
+        
+        # Log credit usage for monitoring
+        credit_report = self.tavily_tool.get_credit_usage_report()
+        logger.info(f"Tavily credit usage - Total: {credit_report['total_credits_used']}, "
+                   f"Estimated cost: ${credit_report['estimated_cost']:.2f}")
+        
+        return {
+            "lead_id": lead_id,
+            "lead_name": f"{lead_data.get('first_name')} {lead_data.get('last_name')}",
+            "company": lead_data.get("company"),
+            "research_summary": research_result.data.get("summary", {}),
+            "status": "researched",
+            "credit_usage": credit_report
+        }
