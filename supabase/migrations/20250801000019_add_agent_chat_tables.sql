@@ -3,8 +3,11 @@
 -- Enables manual agent communication with conversation history and optional RAG memory
 -- RELEVANT FILES: src/routers/chat.py, src/agent/autopilot_agent.py
 
+-- Enable pgvector extension first (required for vector type)
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- 1. Simple conversations table
-CREATE TABLE public.conversations (
+CREATE TABLE IF NOT EXISTS public.conversations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
   campaign_id uuid REFERENCES public.campaigns(id), -- optional campaign context
@@ -12,9 +15,14 @@ CREATE TABLE public.conversations (
 );
 
 -- 2. Chat messages table
-CREATE TYPE public.message_role AS ENUM ('user', 'agent');
+-- Create enum type if it doesn't exist
+DO $$ BEGIN
+  CREATE TYPE public.message_role AS ENUM ('user', 'agent');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
 
-CREATE TABLE public.chat_messages (
+CREATE TABLE IF NOT EXISTS public.chat_messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id uuid REFERENCES public.conversations(id) ON DELETE CASCADE,
   role public.message_role NOT NULL,
@@ -23,7 +31,7 @@ CREATE TABLE public.chat_messages (
 );
 
 -- 3. Optional vector memory (costs nothing to add now)
-CREATE TABLE public.agent_memory (
+CREATE TABLE IF NOT EXISTS public.agent_memory (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id uuid REFERENCES public.conversations(id) ON DELETE CASCADE,
   content text NOT NULL,
@@ -33,9 +41,9 @@ CREATE TABLE public.agent_memory (
 );
 
 -- Create indexes for performance
-CREATE INDEX idx_chat_messages_conversation ON public.chat_messages(conversation_id, created_at);
-CREATE INDEX idx_agent_memory_conversation ON public.agent_memory(conversation_id);
-CREATE INDEX idx_agent_memory_embedding ON public.agent_memory USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON public.chat_messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_memory_conversation ON public.agent_memory(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_agent_memory_embedding ON public.agent_memory USING ivfflat (embedding vector_cosine_ops);
 
 -- 4. Helper function for memory search
 CREATE OR REPLACE FUNCTION match_memories(
@@ -71,13 +79,13 @@ ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_memory ENABLE ROW LEVEL SECURITY;
 
 -- Users can only see their own conversations
-CREATE POLICY "Users can manage their conversations" 
+CREATE POLICY IF NOT EXISTS "Users can manage their conversations" 
 ON public.conversations
 FOR ALL 
 USING (auth.uid() = user_id);
 
 -- Users can view messages in their conversations
-CREATE POLICY "Users can view their messages" 
+CREATE POLICY IF NOT EXISTS "Users can view their messages" 
 ON public.chat_messages
 FOR SELECT 
 USING (
@@ -89,7 +97,7 @@ USING (
 );
 
 -- Users can view memory for their conversations
-CREATE POLICY "Users can view their memory" 
+CREATE POLICY IF NOT EXISTS "Users can view their memory" 
 ON public.agent_memory
 FOR SELECT 
 USING (
