@@ -40,6 +40,21 @@ jobs:
         working-directory: ./frontend
         run: npm ci
 
+      - name: Debug - Check file structure
+        working-directory: ./frontend
+        run: |
+          echo "Current directory:"
+          pwd
+          echo -e "\nDirectory structure:"
+          ls -la
+          echo -e "\nlib directory:"
+          ls -la lib/
+          echo -e "\ntsconfig.json content:"
+          cat tsconfig.json
+          echo -e "\nChecking if files exist:"
+          test -f lib/supabase/client.ts && echo "lib/supabase/client.ts exists" || echo "lib/supabase/client.ts NOT FOUND"
+          test -f lib/utils.ts && echo "lib/utils.ts exists" || echo "lib/utils.ts NOT FOUND"
+
       - name: Run type checking
         working-directory: ./frontend
         run: npm run type-check

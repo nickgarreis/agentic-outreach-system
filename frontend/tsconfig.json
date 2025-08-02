@@ -27,7 +27,9 @@
         "./*"
       ]
     },
-    "target": "ES2017"
+    "target": "ES2017",
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": [
     "next-env.d.ts",
