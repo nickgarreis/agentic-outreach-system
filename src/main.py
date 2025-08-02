@@ -14,7 +14,7 @@ from .config import get_settings
 from .schemas import BaseResponse
 from .middleware import setup_middleware
 from .auth import get_validator
-from .routers import auth_router, client_members_router, webhooks
+from .routers import auth_router, client_members_router, chat_router, webhooks
 from .agent.agentops_config import init_agentops
 
 # Configure logging
@@ -164,6 +164,9 @@ app.include_router(auth_router)
 
 # Client member management routes
 app.include_router(client_members_router)
+
+# Chat routes for agent communication
+app.include_router(chat_router, prefix="/api", tags=["chat"])
 
 # Webhook routes (no auth required for external services)
 app.include_router(webhooks.router, prefix="/api", tags=["webhooks"])

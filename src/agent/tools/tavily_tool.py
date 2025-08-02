@@ -203,8 +203,13 @@ class TavilyTool(BaseTool):
             **extra_params
         }
         
-        # Format template with available parameters
-        query = template.format(**{k: v for k, v in query_params.items() if v})
+        # Format template with available parameters, using empty string for missing keys
+        try:
+            query = template.format(**query_params)
+        except KeyError:
+            # Fallback to safe formatting if template has missing keys
+            safe_params = {k: v if v else "" for k, v in query_params.items()}
+            query = template.format_map(safe_params)
         
         # Clean up extra spaces and limit length
         query = " ".join(query.split())[:400]  # Limit to 400 chars

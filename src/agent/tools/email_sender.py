@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # SendGrid imports
 try:
     from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail, Email, To, Content, Personalization, From
+    from sendgrid.helpers.mail import Mail, Email, To, Content, Personalization, From, CustomArg, Header
 except ImportError:
     SendGridAPIClient = None
     Mail = None
@@ -142,23 +142,27 @@ class EmailSender(BaseTools):
             # Create SendGrid message
             message = Mail(
                 from_email=From(from_email, from_name),
-                to_emails=To(lead_data['email']),
                 subject=self._personalize_text(message_data.get('subject', ''), lead_data),
                 html_content=Content("text/html", formatted_content)
             )
             
+            # Create personalization for tracking and headers
+            personalization = Personalization()
+            personalization.add_to(To(lead_data['email']))
+            
             # Add custom args for tracking
-            message.custom_args = {
-                'message_id': str(message_data['id']),
-                'campaign_id': str(message_data.get('campaign_id', '')),
-                'lead_id': str(message_data.get('lead_id', ''))
-            }
+            personalization.add_custom_arg(CustomArg('message_id', str(message_data['id'])))
+            personalization.add_custom_arg(CustomArg('campaign_id', str(message_data.get('campaign_id', ''))))
+            personalization.add_custom_arg(CustomArg('lead_id', str(message_data.get('lead_id', ''))))
             
             # Add Reply-To if configured
             if reply_to_domain:
                 reply_to_email = f"reply+{message_data['id']}@{reply_to_domain}"
                 message.reply_to = Email(reply_to_email)
-                message.add_header('Message-ID', f"<{message_data['id']}@{reply_to_domain}>")
+                # Add headers using Header objects
+                personalization.add_header(Header('Message-ID', f"<{message_data['id']}@{reply_to_domain}>"))
+            
+            message.add_personalization(personalization)
             
             # Send the email
             response = sg_client.send(message)
@@ -358,19 +362,18 @@ class EmailSender(BaseTools):
                     group_data['subject_template'], lead_data
                 )
                 
-                # Add substitutions for personalization
-                for key, value in self._get_personalization_substitutions(lead_data).items():
-                    personalization.add_substitution(key, value)
+                # Note: We're not using dynamic templates, so we don't need dynamic_template_data
+                # The content is already personalized in the message content
                 
-                # Add tracking
-                personalization.add_custom_arg('message_id', str(msg['id']))
-                personalization.add_custom_arg('campaign_id', str(msg.get('campaign_id', '')))
-                personalization.add_custom_arg('lead_id', str(msg.get('lead_id', '')))
+                # Add tracking using CustomArg objects
+                personalization.add_custom_arg(CustomArg('message_id', str(msg['id'])))
+                personalization.add_custom_arg(CustomArg('campaign_id', str(msg.get('campaign_id', ''))))
+                personalization.add_custom_arg(CustomArg('lead_id', str(msg.get('lead_id', ''))))
                 
-                # Reply-To header
+                # Reply-To header using Header objects
                 if reply_to_domain:
-                    personalization.add_header('Reply-To', f"reply+{msg['id']}@{reply_to_domain}")
-                    personalization.add_header('Message-ID', f"<{msg['id']}@{reply_to_domain}>")
+                    personalization.add_header(Header('Reply-To', f"reply+{msg['id']}@{reply_to_domain}"))
+                    personalization.add_header(Header('Message-ID', f"<{msg['id']}@{reply_to_domain}>"))
                 
                 mail.add_personalization(personalization)
             
@@ -384,7 +387,13 @@ class EmailSender(BaseTools):
                     sendgrid_message_id = response.headers['X-Message-Id']
                 
                 for personalization in mail.personalizations:
-                    msg_id = personalization.custom_args.get('message_id')
+                    # Extract message_id from custom args list of dicts
+                    msg_id = None
+                    if hasattr(personalization, 'custom_args') and personalization.custom_args:
+                        for custom_arg in personalization.custom_args:
+                            if 'message_id' in custom_arg:
+                                msg_id = custom_arg['message_id']
+                                break
                     results.append({
                         "message_id": msg_id,
                         "sendgrid_message_id": sendgrid_message_id,
@@ -397,7 +406,13 @@ class EmailSender(BaseTools):
                 failed += len(mail.personalizations)
                 
                 for personalization in mail.personalizations:
-                    msg_id = personalization.custom_args.get('message_id')
+                    # Extract message_id from custom args list of dicts
+                    msg_id = None
+                    if hasattr(personalization, 'custom_args') and personalization.custom_args:
+                        for custom_arg in personalization.custom_args:
+                            if 'message_id' in custom_arg:
+                                msg_id = custom_arg['message_id']
+                                break
                     results.append({
                         "message_id": msg_id,
                         "error": str(e),
