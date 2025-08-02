@@ -1,0 +1,51 @@
+# .vercelignore - Exclude files from Vercel deployment
+# This improves deployment speed by not uploading unnecessary files
+
+# Documentation
+README.md
+DEPLOYMENT.md
+DEPLOYMENT_CHECKLIST.md
+VERCEL_GIT_INTEGRATION_DISABLE.md
+
+# Development files
+.env.local
+.env.development
+dev.log
+
+# Git
+.git
+.gitignore
+
+# Dependencies (Vercel will install these)
+node_modules
+
+# IDE
+.vscode
+.idea
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__
+coverage
+
+# TypeScript
+*.tsbuildinfo
+
+# Next.js build output (Vercel builds this)
+.next
+out
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Misc
+*.log

@@ -1,0 +1,48 @@
+name: Frontend PR Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'frontend/**'
+
+jobs:
+  quality-checks:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run type checking
+        working-directory: ./frontend
+        run: npm run type-check
+
+      - name: Run linting
+        working-directory: ./frontend
+        run: npm run lint || true
+
+      - name: Test build
+        working-directory: ./frontend
+        run: npm run build
+        env:
+          # Use dummy values for PR builds since we don't have access to secrets
+          NEXT_PUBLIC_SUPABASE_URL: "https://dummy.supabase.co"
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY: "dummy_key"
+
+      - name: Check bundle size
+        working-directory: ./frontend
+        run: npx next-bundle-analysis analyze || echo "Bundle analysis not available"

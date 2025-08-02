@@ -1,0 +1,15 @@
+# Robots.txt for nicode.co
+# Allow all web crawlers
+
+User-agent: *
+Allow: /
+
+# Block access to API routes and private pages
+Disallow: /api/
+Disallow: /dashboard/
+Disallow: /_next/
+Disallow: /login
+Disallow: /register
+
+# Sitemap location (update after deployment)
+# Sitemap: https://nicode.co/sitemap.xml
