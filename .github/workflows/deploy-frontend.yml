@@ -76,21 +76,18 @@ jobs:
             echo "VERCEL_TOKEN is available (hidden)"
           fi
 
-      - name: Link and Deploy to Vercel
+      - name: Deploy to Vercel
         run: |
-          # Navigate to frontend directory
+          # Navigate to frontend directory and deploy
           cd frontend
           
-          # Link to existing project
-          printf '%s\n' "y" "${{ secrets.VERCEL_PROJECT_ID }}" "n" | \
-          vercel link --token="${{ secrets.VERCEL_TOKEN }}"
-          
-          # Deploy to production
+          # Deploy to production (vercel will auto-detect the project from git)
           vercel --prod \
             --token="${{ secrets.VERCEL_TOKEN }}" \
             --env NEXT_PUBLIC_SUPABASE_URL="${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" \
             --env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY="${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY }}" \
             --yes \
+            --name frontend-outreach \
             > deployment-url.txt
           
           # Output deployment URL
