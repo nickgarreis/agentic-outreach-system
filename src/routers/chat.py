@@ -9,10 +9,9 @@ from typing import Optional
 import uuid
 import logging
 
-from ..deps import get_current_user
+from ..deps import get_current_user, UserClaims
 from ..database import get_supabase
 from ..agent import AutopilotAgent
-from ..schemas import User
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ class ChatResponse(BaseModel):
 @router.post("/send", response_model=ChatResponse)
 async def send_message(
     chat_msg: ChatMessage,
-    current_user: User = Depends(get_current_user)
+    current_user: UserClaims = Depends(get_current_user)
 ):
     """
     Send message to AutopilotAgent and get response.
@@ -119,7 +118,7 @@ async def send_message(
 
 @router.get("/conversations")
 async def list_conversations(
-    current_user: User = Depends(get_current_user)
+    current_user: UserClaims = Depends(get_current_user)
 ):
     """
     List all conversations for the current user.
@@ -141,7 +140,7 @@ async def list_conversations(
 async def get_messages(
     conversation_id: str,
     limit: int = 50,
-    current_user: User = Depends(get_current_user)
+    current_user: UserClaims = Depends(get_current_user)
 ):
     """
     Get messages for a specific conversation.
