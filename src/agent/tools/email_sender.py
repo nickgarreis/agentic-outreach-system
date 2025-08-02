@@ -387,12 +387,12 @@ class EmailSender(BaseTools):
                     sendgrid_message_id = response.headers['X-Message-Id']
                 
                 for personalization in mail.personalizations:
-                    # Extract message_id from custom args list
+                    # Extract message_id from custom args list of dicts
                     msg_id = None
                     if hasattr(personalization, 'custom_args') and personalization.custom_args:
                         for custom_arg in personalization.custom_args:
-                            if custom_arg.key == 'message_id':
-                                msg_id = custom_arg.value
+                            if 'message_id' in custom_arg:
+                                msg_id = custom_arg['message_id']
                                 break
                     results.append({
                         "message_id": msg_id,
@@ -406,12 +406,12 @@ class EmailSender(BaseTools):
                 failed += len(mail.personalizations)
                 
                 for personalization in mail.personalizations:
-                    # Extract message_id from custom args list
+                    # Extract message_id from custom args list of dicts
                     msg_id = None
                     if hasattr(personalization, 'custom_args') and personalization.custom_args:
                         for custom_arg in personalization.custom_args:
-                            if custom_arg.key == 'message_id':
-                                msg_id = custom_arg.value
+                            if 'message_id' in custom_arg:
+                                msg_id = custom_arg['message_id']
                                 break
                     results.append({
                         "message_id": msg_id,
