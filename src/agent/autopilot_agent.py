@@ -789,3 +789,70 @@ class AutopilotAgent:
             "enriched": update_data.get("full_context", {}).get("enriched", False),
             "error": update_data.get("full_context", {}).get("enrichment_error")
         }
+    
+    @track_operation("chat")
+    async def chat(self, conversation_id: str, user_message: str) -> str:
+        """
+        Handle synchronous chat with context from conversation history.
+        
+        Args:
+            conversation_id: UUID of the conversation
+            user_message: User's message
+            
+        Returns:
+            str: Agent's response
+        """
+        logger.info(f"Processing chat message for conversation: {conversation_id}")
+        
+        supabase = await get_supabase()
+        
+        # Get recent conversation history
+        history_result = await supabase.table("chat_messages")\
+            .select("role, content")\
+            .eq("conversation_id", conversation_id)\
+            .order("created_at", desc=False)\
+            .limit(10)\
+            .execute()
+        
+        # Build messages for OpenAI
+        messages = [
+            {
+                "role": "system", 
+                "content": """You are the AutopilotAgent, an AI assistant for managing outreach campaigns. 
+                
+You can help users with:
+- Getting new leads (e.g., "get 10 new leads from Apollo")
+- Enriching specific leads (e.g., "enrich lead with ID xyz" or "find email for John Doe")
+- Researching leads for personalized outreach
+- Creating and scheduling outreach messages
+- Viewing campaign statistics and performance
+- Managing campaign settings
+
+Be conversational, helpful, and suggest specific actions the user can take.
+When users ask for actions, acknowledge what you'll do but explain that they need to create a job for actual execution."""
+            }
+        ]
+        
+        # Add conversation history
+        for msg in history_result.data:
+            messages.append({
+                "role": "user" if msg["role"] == "user" else "assistant",
+                "content": msg["content"]
+            })
+        
+        # Add current message
+        messages.append({"role": "user", "content": user_message})
+        
+        # Generate response
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=self.max_tokens
+        )
+        
+        agent_response = response.choices[0].message.content
+        
+        logger.info(f"Generated chat response for conversation {conversation_id}")
+        
+        return agent_response
