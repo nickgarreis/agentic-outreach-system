@@ -76,6 +76,16 @@ jobs:
             echo "VERCEL_TOKEN is available (hidden)"
           fi
 
+      - name: Link Vercel project
+        working-directory: ./frontend
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          # Remove any existing Vercel config and re-link
+          rm -rf .vercel
+          vercel link --yes --project=frontend-outreach \
+            --token="$VERCEL_TOKEN"
+
       - name: Pull Vercel environment information
         working-directory: ./frontend
         env:
@@ -90,8 +100,7 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           vercel build --prod \
-            --token="$VERCEL_TOKEN" \
-            --cwd=.
+            --token="$VERCEL_TOKEN"
 
       - name: Deploy to Vercel with environment variables (Option 3)
         working-directory: ./frontend
@@ -103,7 +112,6 @@ jobs:
           # Deploy using Option 3: Pass environment variables directly via CLI flags
           vercel deploy --prebuilt --prod \
             --token="$VERCEL_TOKEN" \
-            --cwd=. \
             --env NEXT_PUBLIC_SUPABASE_URL="$SUPABASE_URL" \
             --env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY="$SUPABASE_KEY" \
             > deployment-url.txt
