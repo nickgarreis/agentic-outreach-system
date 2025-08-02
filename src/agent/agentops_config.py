@@ -32,8 +32,12 @@ def init_agentops(api_key: Optional[str] = None) -> bool:
             logger.warning("AgentOps API key not found, skipping initialization")
             return False
 
-        # Initialize AgentOps
-        agentops.init(api_key=api_key)
+        # Initialize AgentOps with configuration to suppress OpenAI instrumentor warnings
+        agentops.init(
+            api_key=api_key,
+            skip_auto_start_session=True,  # We manage sessions manually
+            instrument_llm_calls=False,  # Disable automatic LLM instrumentation to avoid warnings
+        )
         logger.info("✓ AgentOps initialized successfully")
         return True
 
