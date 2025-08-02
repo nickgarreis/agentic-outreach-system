@@ -78,16 +78,20 @@ jobs:
 
       - name: Deploy to Vercel
         run: |
-          # Navigate to frontend directory and deploy
+          # Create a new deployment from scratch
           cd frontend
           
-          # Deploy to production (vercel will auto-detect the project from git)
+          # Remove any existing .vercel directory to start fresh
+          rm -rf .vercel
+          
+          # Deploy as a new project, ignoring the misconfigured one
           vercel --prod \
             --token="${{ secrets.VERCEL_TOKEN }}" \
             --env NEXT_PUBLIC_SUPABASE_URL="${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" \
             --env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY="${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY }}" \
             --yes \
-            --name frontend-outreach \
+            --force \
+            --public \
             > deployment-url.txt
           
           # Output deployment URL
