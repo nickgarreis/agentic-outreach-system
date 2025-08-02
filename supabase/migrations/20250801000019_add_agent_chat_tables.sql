@@ -78,35 +78,54 @@ ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_memory ENABLE ROW LEVEL SECURITY;
 
+-- Create policies with proper exception handling
 -- Users can only see their own conversations
-CREATE POLICY IF NOT EXISTS "Users can manage their conversations" 
-ON public.conversations
-FOR ALL 
-USING (auth.uid() = user_id);
+DO $$ 
+BEGIN
+  CREATE POLICY "Users can manage their conversations" 
+  ON public.conversations
+  FOR ALL 
+  USING (auth.uid() = user_id);
+EXCEPTION
+  WHEN duplicate_object THEN 
+    RAISE NOTICE 'Policy "Users can manage their conversations" already exists, skipping';
+END $$;
 
 -- Users can view messages in their conversations
-CREATE POLICY IF NOT EXISTS "Users can view their messages" 
-ON public.chat_messages
-FOR SELECT 
-USING (
-  EXISTS (
-    SELECT 1 FROM public.conversations 
-    WHERE id = chat_messages.conversation_id 
-    AND user_id = auth.uid()
-  )
-);
+DO $$ 
+BEGIN
+  CREATE POLICY "Users can view their messages" 
+  ON public.chat_messages
+  FOR SELECT 
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.conversations 
+      WHERE id = chat_messages.conversation_id 
+      AND user_id = auth.uid()
+    )
+  );
+EXCEPTION
+  WHEN duplicate_object THEN 
+    RAISE NOTICE 'Policy "Users can view their messages" already exists, skipping';
+END $$;
 
 -- Users can view memory for their conversations
-CREATE POLICY IF NOT EXISTS "Users can view their memory" 
-ON public.agent_memory
-FOR SELECT 
-USING (
-  EXISTS (
-    SELECT 1 FROM public.conversations 
-    WHERE id = agent_memory.conversation_id 
-    AND user_id = auth.uid()
-  )
-);
+DO $$ 
+BEGIN
+  CREATE POLICY "Users can view their memory" 
+  ON public.agent_memory
+  FOR SELECT 
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.conversations 
+      WHERE id = agent_memory.conversation_id 
+      AND user_id = auth.uid()
+    )
+  );
+EXCEPTION
+  WHEN duplicate_object THEN 
+    RAISE NOTICE 'Policy "Users can view their memory" already exists, skipping';
+END $$;
 
 -- Add helpful comments
 COMMENT ON TABLE public.conversations IS 'Chat sessions between users and AutopilotAgent';
