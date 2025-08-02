@@ -144,4 +144,4 @@ The dev server will automatically use the next available port if 3000 is taken.
 ### Build errors
 - Run `npm run type-check` to find TypeScript issues
 - Check all environment variables are set
-- Ensure Node.js version is 18+# Deploy to production
+- Ensure Node.js version is 18+# Deploy to production - Fixed root directory
