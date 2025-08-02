@@ -76,15 +76,15 @@ jobs:
             echo "VERCEL_TOKEN is available (hidden)"
           fi
 
-      - name: Link Vercel project
+      - name: Setup Vercel project config
         working-directory: ./frontend
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          # Remove any existing Vercel config and re-link
-          rm -rf .vercel
-          vercel link --yes --project=frontend-outreach \
-            --token="$VERCEL_TOKEN"
+          # Create .vercel directory with correct project config
+          mkdir -p .vercel
+          echo '{
+            "orgId": "${{ secrets.VERCEL_ORG_ID }}",
+            "projectId": "${{ secrets.VERCEL_PROJECT_ID }}"
+          }' > .vercel/project.json
 
       - name: Pull Vercel environment information
         working-directory: ./frontend
@@ -95,25 +95,19 @@ jobs:
             --token="$VERCEL_TOKEN"
 
       - name: Build project artifacts for Vercel
-        working-directory: ./frontend
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
+          cd frontend
           vercel build --prod \
-            --token="$VERCEL_TOKEN"
+            --token="${{ secrets.VERCEL_TOKEN }}"
 
       - name: Deploy to Vercel with environment variables (Option 3)
-        working-directory: ./frontend
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY }}
         run: |
+          cd frontend
           # Deploy using Option 3: Pass environment variables directly via CLI flags
           vercel deploy --prebuilt --prod \
-            --token="$VERCEL_TOKEN" \
-            --env NEXT_PUBLIC_SUPABASE_URL="$SUPABASE_URL" \
-            --env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY="$SUPABASE_KEY" \
+            --token="${{ secrets.VERCEL_TOKEN }}" \
+            --env NEXT_PUBLIC_SUPABASE_URL="${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" \
+            --env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY="${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY }}" \
             > deployment-url.txt
           
           # Output deployment URL
