@@ -13,10 +13,6 @@ on:
       - '.github/workflows/deploy-frontend.yml'
   workflow_dispatch:
 
-env:
-  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-
 jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
@@ -24,6 +20,10 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     
     steps:
       - name: Checkout code
@@ -68,20 +68,24 @@ jobs:
 
       - name: Pull Vercel environment information
         working-directory: ./frontend
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        run: |
+          vercel pull --yes --environment=production \
+            --token="${VERCEL_TOKEN}"
 
       - name: Build project artifacts for Vercel
         working-directory: ./frontend
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        run: |
+          vercel build --prod \
+            --token="${VERCEL_TOKEN}"
 
       - name: Deploy to Vercel with environment variables (Option 3)
         working-directory: ./frontend
         run: |
           # Deploy using Option 3: Pass environment variables directly via CLI flags
           vercel deploy --prebuilt --prod \
-            --token=${{ secrets.VERCEL_TOKEN }} \
-            -e NEXT_PUBLIC_SUPABASE_URL="${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" \
-            -e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY="${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY }}" \
+            --token="${VERCEL_TOKEN}" \
+            --env NEXT_PUBLIC_SUPABASE_URL="${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" \
+            --env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY="${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY }}" \
             > deployment-url.txt
           
           # Output deployment URL
