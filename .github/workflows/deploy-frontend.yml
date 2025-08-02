@@ -89,11 +89,12 @@ jobs:
       - name: Deploy to Vercel with environment variables (Option 3)
         working-directory: ./frontend
         run: |
-          # Deploy using the build we already created
-          vercel deploy --prebuilt --prod \
+          # Deploy and build on Vercel
+          vercel --prod \
             --token="${{ secrets.VERCEL_TOKEN }}" \
             --env NEXT_PUBLIC_SUPABASE_URL="${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" \
             --env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY="${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY }}" \
+            --yes \
             > deployment-url.txt
           
           # Output deployment URL
