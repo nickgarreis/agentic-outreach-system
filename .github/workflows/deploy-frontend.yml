@@ -76,20 +76,16 @@ jobs:
             echo "VERCEL_TOKEN is available (hidden)"
           fi
 
-      - name: Setup Vercel project config
-        working-directory: ./frontend
+      - name: Link and Deploy to Vercel
         run: |
-          # Create .vercel directory with correct project config
-          mkdir -p .vercel
-          echo '{
-            "orgId": "${{ secrets.VERCEL_ORG_ID }}",
-            "projectId": "${{ secrets.VERCEL_PROJECT_ID }}"
-          }' > .vercel/project.json
-
-      - name: Deploy to Vercel with environment variables (Option 3)
-        working-directory: ./frontend
-        run: |
-          # Deploy and build on Vercel
+          # Navigate to frontend directory
+          cd frontend
+          
+          # Link to existing project
+          printf '%s\n' "y" "${{ secrets.VERCEL_PROJECT_ID }}" "n" | \
+          vercel link --token="${{ secrets.VERCEL_TOKEN }}"
+          
+          # Deploy to production
           vercel --prod \
             --token="${{ secrets.VERCEL_TOKEN }}" \
             --env NEXT_PUBLIC_SUPABASE_URL="${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" \
